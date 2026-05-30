@@ -193,46 +193,79 @@ func getUptime() string {
 func detectRegion(tag string) string {
 	runes := []rune(tag)
 	upper := strings.ToUpper(tag)
+	var code string
 
-	// 方式1: 国旗 emoji 开头 → "🇸🇬 SG"
+	// 提取地区码
+	// 方式1: 国旗 emoji 开头
 	for i := 0; i < len(runes)-1; i++ {
 		if runes[i] >= 0x1F1E6 && runes[i] <= 0x1F1FF &&
 			runes[i+1] >= 0x1F1E6 && runes[i+1] <= 0x1F1FF {
-			code := string([]rune{
+			code = string([]rune{
 				rune(runes[i] - 0x1F1E6 + 'A'),
 				rune(runes[i+1] - 0x1F1E6 + 'A'),
 			})
-			return string(runes[i:i+2]) + " " + code
+			break
 		}
 	}
 
-	// 方式2: [HK] 方括号开头 → "HK"
-	if len(runes) >= 4 && runes[0] == '[' {
-		end := -1
+	// 方式2: [HK] 方括号开头
+	if code == "" && len(runes) >= 4 && runes[0] == '[' {
 		for j := 1; j < len(runes) && j <= 6; j++ {
 			if runes[j] == ']' {
-				end = j
+				s := string(runes[1:j])
+				if isCapsCode(s) {
+					code = strings.ToUpper(s)
+				}
 				break
 			}
 		}
-		if end >= 2 {
-			code := string(runes[1:end])
-			if isCapsCode(code) {
-				return strings.ToUpper(code)
+	}
+
+	// 方式3: 纯大写字码开头
+	if code == "" {
+		parts := strings.Fields(upper)
+		if len(parts) > 0 {
+			first := strings.Trim(parts[0], "_-[]")
+			if isCapsCode(first) {
+				code = first
 			}
 		}
 	}
 
-	// 方式3: 纯大写字码开头 (如 "SG新加坡-01" → "SG")
-	parts := strings.Fields(upper)
-	if len(parts) > 0 {
-		first := strings.Trim(parts[0], "_-[]")
-		if isCapsCode(first) {
-			return first
-		}
+	if code == "" {
+		return "其他"
 	}
 
-	return "其他"
+	// 码→中文名
+	nameMap := map[string]string{
+		"SG": "新加坡", "HK": "香港", "JP": "日本", "KR": "韩国",
+		"US": "美国", "USA": "美国", "TW": "台湾", "CN": "台湾",
+		"IN": "印度", "AU": "澳大利亚", "UK": "英国",
+		"CA": "加拿大", "DE": "德国", "FR": "法国",
+		"RU": "俄罗斯", "BR": "巴西", "ID": "印尼", "TH": "泰国",
+		"MY": "马来西亚", "PH": "菲律宾", "VN": "越南", "TR": "土耳其",
+		"IT": "意大利", "ES": "西班牙", "NL": "荷兰", "SE": "瑞典",
+		"CH": "瑞士", "PL": "波兰", "AR": "阿根廷", "MX": "墨西哥",
+		"GB": "英国",
+	}
+	name, ok := nameMap[code]
+	if !ok {
+		return code
+	}
+
+	// 码→国旗 emoji
+	flag := codeToFlag(code)
+	return flag + " " + name
+}
+
+func codeToFlag(code string) string {
+	if len(code) < 2 {
+		return code
+	}
+	return string([]rune{
+		rune(code[0]-'A') + 0x1F1E6,
+		rune(code[1]-'A') + 0x1F1E6,
+	})
 }
 
 func isCapsCode(s string) bool {
