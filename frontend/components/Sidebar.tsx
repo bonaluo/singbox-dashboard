@@ -4,7 +4,13 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState, useEffect } from 'react'
 
-const API = process.env.NEXT_PUBLIC_API || 'http://localhost:9092'
+function getApiUrl() {
+  if (typeof window !== 'undefined') {
+    const stored = localStorage.getItem('apiUrl')
+    if (stored) return stored
+  }
+  return process.env.NEXT_PUBLIC_API || 'http://10.31.3.87:9092'
+}
 
 const navItems = [
   { href: '/', label: '首页', icon: '🏠' },
@@ -15,7 +21,8 @@ const navItems = [
 ]
 
 export function api(endpoint: string, options?: RequestInit) {
-  return fetch(`${API}${endpoint}`, {
+  const base = getApiUrl()
+  return fetch(`${base}${endpoint}`, {
     headers: { 'Content-Type': 'application/json' },
     ...options,
   }).then(r => r.json())
