@@ -32,7 +32,7 @@ export default function ProxiesPage() {
     if (!grouped[region]) grouped[region] = []
     grouped[region].push(p)
   })
-  const regionOrder = ['新加坡','香港','日本','美国','台湾','印度','澳大利亚','英国','加拿大','德国','法国']
+  const regionOrder = ['新加坡','香港','日本','美国','台湾','印度','澳大利亚','英国','加拿大','德国','法国','其他']
 
   return (
     <div className="max-w-2xl">
