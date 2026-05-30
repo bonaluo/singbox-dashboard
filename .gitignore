@@ -1,0 +1,5 @@
+backend/singbox-dashboard
+frontend/.next/
+frontend/node_modules/
+*.exe
+*.test
