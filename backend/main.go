@@ -1,0 +1,55 @@
+package main
+
+import (
+	"log"
+	"net/http"
+	"os"
+	"singbox-dashboard/config"
+	"singbox-dashboard/handlers"
+	"strings"
+)
+
+func main() {
+	// 确保数据目录存在
+	os.MkdirAll(config.DataDir, 0755)
+
+	// 注册所有路由
+	mux := http.NewServeMux()
+	handlers.Register(mux)
+
+	// CORS 中间件
+	srv := &http.Server{
+		Addr:    config.ListenAddr,
+		Handler: corsMiddleware(mux),
+	}
+
+	log.Printf("🚀 singbox-dashboard 后端启动")
+	log.Printf("   监听: http://%s", config.ListenAddr)
+	log.Printf("   sing-box 配置: %s", config.SingBoxConfig)
+	log.Printf("   数据目录: %s", config.DataDir)
+	log.Println("   ────────────────────────────────────────")
+
+	if err := srv.ListenAndServe(); err != nil {
+		log.Fatalf("服务端错误: %v", err)
+	}
+}
+
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(204)
+			return
+		}
+
+		// 日志
+		if !strings.HasPrefix(r.URL.Path, "/api/logs") {
+			log.Printf("%s %s", r.Method, r.URL.Path)
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
