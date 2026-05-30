@@ -43,7 +43,9 @@ export default function ProxiesPage() {
         if (!nodes?.length) return null
         return (
           <div key={region} className="mb-4">
-            <div className="text-sm font-semibold text-gray-400 mb-2 border-l-2 border-[var(--accent)] pl-3">{region}</div>
+            <div className="text-sm font-semibold text-gray-400 mb-2 border-l-2 border-[var(--accent)] pl-3">
+              {region} ({nodes.length})
+            </div>
             <div className="space-y-1">
               {nodes.map((p, i) => (
                 <button
