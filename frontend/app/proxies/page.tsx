@@ -32,13 +32,18 @@ export default function ProxiesPage() {
     if (!grouped[region]) grouped[region] = []
     grouped[region].push(p)
   })
-  const regionOrder = ['新加坡','香港','日本','美国','台湾','印度','澳大利亚','英国','加拿大','德国','法国','其他']
+  // 动态排序：节点多的在前，"其他"排最后
+  const sortedRegions = Object.keys(grouped).sort((a, b) => {
+    if (a === '其他') return 1
+    if (b === '其他') return -1
+    return grouped[b].length - grouped[a].length
+  })
 
   return (
     <div className="max-w-2xl">
       <h2 className="text-xl font-bold mb-4">🔗 节点列表 ({proxies.length})</h2>
 
-      {regionOrder.map(region => {
+      {sortedRegions.map(region => {
         const nodes = grouped[region]
         if (!nodes?.length) return null
         return (
