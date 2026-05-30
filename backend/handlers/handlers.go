@@ -25,6 +25,7 @@ func Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/subscriptions", handleAddSubscription)
 	mux.HandleFunc("DELETE /api/subscriptions/{id}", handleDeleteSubscription)
 	mux.HandleFunc("POST /api/subscriptions/{id}/fetch", handleFetchSubscription)
+	mux.HandleFunc("POST /api/subscriptions/{id}/apply", handleApplySubscription)
 
 	// ── 规则 ──
 	mux.HandleFunc("GET /api/rules", handleListRules)
@@ -142,6 +143,16 @@ func handleFetchSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sendOK(w, result)
+}
+
+func handleApplySubscription(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := services.ApplySubscription(id); err != nil {
+		sendError(w, 500, err.Error())
+		return
+	}
+	_ = services.RestartService()
+	sendOK(w, map[string]string{"msg": "订阅已应用，服务已重启"})
 }
 
 func handleListRules(w http.ResponseWriter, r *http.Request) {

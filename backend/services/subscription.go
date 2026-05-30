@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"singbox-dashboard/config"
 	"singbox-dashboard/models"
 	"strings"
@@ -155,6 +156,11 @@ func FetchAndParseSubscription(id string) (*FetchResult, error) {
 		UpdatedAt: time.Now().Format("2006-01-02 15:04:05"),
 	}
 
+	// 持久化解析结果到文件
+	os.MkdirAll(filepath.Join(config.DataDir, "subscription_data"), 0755)
+	cacheData, _ := json.MarshalIndent(result, "", "  ")
+	os.WriteFile(filepath.Join(config.DataDir, "subscription_data", id+".json"), cacheData, 0644)
+
 	// 保存更新时间到 store
 	for i := range store.Subscriptions {
 		if store.Subscriptions[i].ID == id {
@@ -165,6 +171,96 @@ func FetchAndParseSubscription(id string) (*FetchResult, error) {
 	SaveSubscriptions(store)
 
 	return result, nil
+}
+
+// ── 应用订阅到 sing-box（切换订阅） ──
+
+func ApplySubscription(id string) error {
+	// 从缓存读取
+	data, err := os.ReadFile(filepath.Join(config.DataDir, "subscription_data", id+".json"))
+	if err != nil {
+		return fmt.Errorf("请先拉取解析订阅: %w", err)
+	}
+	var cached FetchResult
+	if err := json.Unmarshal(data, &cached); err != nil {
+		return fmt.Errorf("缓存数据损坏: %w", err)
+	}
+
+	cfg, err := loadSingBoxConfig()
+	if err != nil {
+		return err
+	}
+
+	var newOutbounds []interface{}
+	for _, n := range cached.Nodes {
+		ob := map[string]interface{}{
+			"type":            n.Type,
+			"tag":             n.Tag,
+			"server":          n.Server,
+			"server_port":     n.Port,
+			"domain_resolver": "dns-local",
+		}
+		// 从 raw_link 解析完整 vmess 配置
+		if n.RawLink != "" && strings.HasPrefix(n.RawLink, "vmess://") {
+			payload := n.RawLink[8:]
+			if m := len(payload) % 4; m != 0 {
+				payload += strings.Repeat("=", 4-m)
+			}
+			if data, e := base64.StdEncoding.DecodeString(payload); e == nil {
+				var vm map[string]interface{}
+				if json.Unmarshal(data, &vm) == nil {
+					ob["uuid"] = vm["id"]
+					ob["security"] = "auto"
+					ob["alter_id"] = 0
+					transport := map[string]interface{}{}
+					if net, _ := vm["net"].(string); net == "ws" {
+						transport["type"] = "ws"
+						transport["path"] = vm["path"]
+						if host, ok := vm["host"].(string); ok && host != "" {
+							transport["headers"] = map[string]interface{}{"Host": host}
+						}
+					} else {
+						transport["type"] = net
+					}
+					ob["transport"] = transport
+					if tls, _ := vm["tls"].(string); tls == "tls" {
+						ob["tls"] = map[string]interface{}{"enabled": true}
+					}
+				}
+			}
+		}
+		newOutbounds = append(newOutbounds, ob)
+	}
+
+	// 构建 selector，排除非代理行（tag 含流量/套餐/到期/剩余/过滤等）
+	var tags []string
+	for _, n := range cached.Nodes {
+		if n.Type == "vmess" {
+			infoKws := []string{"流量", "套餐", "到期", "剩余", "过滤"}
+			skip := false
+			for _, kw := range infoKws {
+				if strings.Contains(n.Tag, kw) {
+					skip = true
+					break
+				}
+			}
+			if !skip {
+				tags = append(tags, n.Tag)
+			}
+		}
+	}
+	tags = append(tags, "direct")
+	newOutbounds = append(newOutbounds, map[string]interface{}{
+		"type": "selector", "tag": "proxy",
+		"outbounds": tags,
+		"default":   tags[0],
+	})
+	newOutbounds = append(newOutbounds, map[string]interface{}{
+		"type": "direct", "tag": "direct", "domain_resolver": "dns-local",
+	})
+
+	cfg["outbounds"] = newOutbounds
+	return WriteSingBoxConfig(cfg)
 }
 
 // ── 解析 vmess:// / ss:// 等链接 ──
@@ -212,19 +308,7 @@ func parseSubscriptionLines(lines []string) []models.ProxyNode {
 			continue
 		}
 
-		// 跳过信息行（套餐/流量等）
-		infoKeywords := []string{"套餐", "流量", "重置", "到期", "剩余", "过滤"}
-		skip := false
-		for _, kw := range infoKeywords {
-			if strings.Contains(tag, kw) {
-				skip = true
-				break
-			}
-		}
-		if skip {
-			continue
-		}
-
+		// dedup — 相同 tag 只保留第一条
 		if seen[tag] {
 			continue
 		}

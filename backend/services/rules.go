@@ -143,10 +143,16 @@ func ApplyRules() error {
 		rules = append(rules, rule)
 	}
 
-	cfg["route"] = map[string]interface{}{
-		"rules": rules,
-		"final": "proxy",
-		"default_domain_resolver": "dns-local",
+	// 只更新 route.rules + final，保留 rule_set 等
+	route, ok := cfg["route"].(map[string]interface{})
+	if !ok {
+		route = make(map[string]interface{})
+		cfg["route"] = route
+	}
+	route["rules"] = rules
+	route["final"] = "proxy"
+	if _, has := route["default_domain_resolver"]; !has {
+		route["default_domain_resolver"] = "dns-local"
 	}
 
 	return WriteSingBoxConfig(cfg)
