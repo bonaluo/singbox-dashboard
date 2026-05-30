@@ -191,22 +191,51 @@ func getUptime() string {
 }
 
 func detectRegion(tag string) string {
-	mapping := map[string]string{
-		"新加坡": "新加坡", "SG": "新加坡",
-		"香港": "香港", "HK": "香港",
-		"日本": "日本", "JP": "日本",
-		"美国": "美国", "US": "美国", "USA": "美国",
-		"台湾": "台湾", "TW": "台湾",
-		"印度": "印度", "IN": "印度",
-		"澳大利亚": "澳大利亚", "AU": "澳大利亚",
-		"英国": "英国", "UK": "英国",
-		"加拿大": "加拿大", "CA": "加拿大",
-		"德国": "德国", "DE": "德国",
-		"法国": "法国", "FR": "法国",
+	// 方式1: 从 tag 提取国旗后的地区码 (如 "🇸🇬 SG新加坡-01" → SG)
+	codeMap := map[string]string{
+		"SG": "新加坡", "HK": "香港", "JP": "日本", "KR": "韩国",
+		"US": "美国", "USA": "美国", "TW": "台湾",
+		"IN": "印度", "AU": "澳大利亚", "UK": "英国",
+		"CA": "加拿大", "DE": "德国", "FR": "法国",
+		"RU": "俄罗斯", "BR": "巴西", "ID": "印尼", "TH": "泰国",
+		"MY": "马来西亚", "PH": "菲律宾", "VN": "越南", "TR": "土耳其",
+		"IT": "意大利", "ES": "西班牙", "NL": "荷兰", "SE": "瑞典",
+		"CH": "瑞士", "PL": "波兰", "AR": "阿根廷", "MX": "墨西哥",
 	}
-	upper := strings.ToUpper(tag)
+	// 提取国旗 emoji 后的2-3位大写字母码
+	runes := []rune(tag)
+	for i := 0; i < len(runes); i++ {
+		// 检测国旗 emoji (Regional Indicator, U+1F1E6-U+1F1FF)
+		if runes[i] >= 0x1F1E6 && runes[i] <= 0x1F1FF && i+1 < len(runes) &&
+			runes[i+1] >= 0x1F1E6 && runes[i+1] <= 0x1F1FF {
+			// 跳过国旗和后面的空格
+			j := i + 2
+			for j < len(runes) && runes[j] == ' ' {
+				j++
+			}
+			// 提取大写字码
+			code := []rune{}
+			for j < len(runes) && ((runes[j] >= 'A' && runes[j] <= 'Z') || (runes[j] >= 'a' && runes[j] <= 'z')) {
+				code = append(code, runes[j])
+				j++
+			}
+			codeStr := strings.ToUpper(string(code))
+			if name, ok := codeMap[codeStr]; ok {
+				return name
+			}
+			break // 已处理过国旗，不再重复
+		}
+	}
+
+	// 方式2: 兜底关键词匹配
+	mapping := map[string]string{
+		"新加坡": "新加坡", "香港": "香港", "日本": "日本",
+		"美国": "美国", "台湾": "台湾", "印度": "印度",
+		"澳大利亚": "澳大利亚", "英国": "英国", "加拿大": "加拿大",
+		"德国": "德国", "法国": "法国", "韩国": "韩国",
+	}
 	for key, region := range mapping {
-		if strings.Contains(upper, strings.ToUpper(key)) || strings.Contains(tag, key) {
+		if strings.Contains(tag, key) {
 			return region
 		}
 	}
