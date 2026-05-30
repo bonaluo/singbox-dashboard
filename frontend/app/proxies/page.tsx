@@ -44,7 +44,7 @@ export default function ProxiesPage() {
       <h2 className="text-xl font-bold mb-4">🔗 节点列表 ({proxies.length})</h2>
 
       {sortedRegions.map(region => {
-        const nodes = grouped[region]
+        const nodes = grouped[region].sort((a: any, b: any) => a.tag.localeCompare(b.tag))
         if (!nodes?.length) return null
         return (
           <div key={region} className="mb-4">
