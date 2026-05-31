@@ -180,6 +180,15 @@ func getClashCurrent() string {
 
 // ── 内部辅助 ──
 
+// GetRawConfig 返回原始 sing-box 配置 JSON
+func GetRawConfig() (json.RawMessage, error) {
+	data, err := os.ReadFile(config.SingBoxConfig)
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(data), nil
+}
+
 func loadSingBoxConfig() (map[string]interface{}, error) {
 	data, err := os.ReadFile(config.SingBoxConfig)
 	if err != nil {

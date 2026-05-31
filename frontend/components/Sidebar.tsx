@@ -17,6 +17,7 @@ const navItems = [
   { href: '/proxies', label: '节点', icon: '🔗' },
   { href: '/subscriptions', label: '订阅', icon: '📡' },
   { href: '/rules', label: '规则', icon: '📋' },
+  { href: '/config', label: '配置', icon: '📄' },
   { href: '/settings', label: '设置', icon: '⚙️' },
 ]
 

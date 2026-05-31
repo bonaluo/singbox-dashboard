@@ -36,6 +36,9 @@ func Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/rules/apply", handleApplyRules)
 	mux.HandleFunc("GET /api/rules/options", handleRuleOptions)
 
+	// ── 配置 ──
+	mux.HandleFunc("GET /api/config", handleGetConfig)
+
 	// ── 连接 ──
 	mux.HandleFunc("GET /api/connections", handleConnections)
 
@@ -248,6 +251,15 @@ func handleRuleOptions(w http.ResponseWriter, r *http.Request) {
 		"rule_types": types,
 		"outbounds":  options,
 	})
+}
+
+func handleGetConfig(w http.ResponseWriter, r *http.Request) {
+	raw, err := services.GetRawConfig()
+	if err != nil {
+		sendError(w, 500, "读取配置失败: "+err.Error())
+		return
+	}
+	sendJSON(w, 200, models.APIResponse{OK: true, Data: raw})
 }
 
 func handleConnections(w http.ResponseWriter, r *http.Request) {
