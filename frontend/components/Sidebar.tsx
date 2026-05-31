@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useState, useEffect } from 'react'
+import { useSSE } from '@/hooks/useSSE'
 
 function getApiUrl() {
   if (typeof window !== 'undefined') {
@@ -31,21 +31,9 @@ export function api(endpoint: string, options?: RequestInit) {
   }).then(r => r.json())
 }
 
-export function useStatus() {
-  const [status, setStatus] = useState<any>(null)
-  useEffect(() => {
-    let active = true
-    const fetch = () => api('/api/status').then(r => active && setStatus(r.data))
-    fetch()
-    const t = setInterval(fetch, 10000)
-    return () => { active = false; clearInterval(t) }
-  }, [])
-  return status
-}
-
 export default function Sidebar({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
-  const status = useStatus()
+  const { status } = useSSE(['status'])
 
   return (
     <div className="flex h-screen">

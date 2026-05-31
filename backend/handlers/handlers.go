@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"singbox-dashboard/models"
 	"singbox-dashboard/services"
+	"strings"
 )
 
 // ═══════════════════════════════════════════════════════════
@@ -39,6 +40,9 @@ func Register(mux *http.ServeMux) {
 
 	// ── 配置 ──
 	mux.HandleFunc("GET /api/config", handleGetConfig)
+
+	// ── SSE 事件推送 ──
+	mux.HandleFunc("GET /api/events", handleSSE)
 
 	// ── 日志 ──
 	mux.HandleFunc("GET /api/logs", handleGetLogs)
@@ -255,6 +259,52 @@ func handleRuleOptions(w http.ResponseWriter, r *http.Request) {
 		"rule_types": types,
 		"outbounds":  options,
 	})
+}
+
+func handleSSE(w http.ResponseWriter, r *http.Request) {
+	// 解析订阅类型
+	typesStr := r.URL.Query().Get("types")
+	if typesStr == "" {
+		typesStr = "status"
+	}
+	types := strings.Split(typesStr, ",")
+
+	client := services.SubscribeSSE(types)
+	if client == nil {
+		sendError(w, 500, "SSE hub not initialized")
+		return
+	}
+	defer services.UnsubscribeSSE(client)
+
+	// SSE headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.WriteHeader(200)
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		return
+	}
+
+	// 发送初始连接确认
+	fmt.Fprintf(w, "event: connected\ndata: {}\n\n")
+	flusher.Flush()
+
+	ctx := r.Context()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case evt, ok := <-client.Ch:
+			if !ok {
+				return
+			}
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, evt.Data)
+			flusher.Flush()
+		}
+	}
 }
 
 func handleGetLogs(w http.ResponseWriter, r *http.Request) {

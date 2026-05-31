@@ -1,7 +1,7 @@
 'use client'
 
-import { api } from '@/components/Sidebar'
-import { useState, useEffect, useCallback } from 'react'
+import { useSSE } from '@/hooks/useSSE'
+import { useState } from 'react'
 
 interface Connection {
   id: string
@@ -45,33 +45,10 @@ function fmtDuration(start: string) {
 }
 
 export default function ConnectionsPage() {
-  const [conns, setConns] = useState<Connection[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+  const { connections: sseData } = useSSE(['connections'])
+  const conns: Connection[] = sseData?.connections || []
   const [sortKey, setSortKey] = useState<string>('start')
   const [sortDir, setSortDir] = useState<1 | -1>(-1)
-
-  const fetchConns = useCallback(async () => {
-    try {
-      const r = await api('/api/connections')
-      if (r.ok) {
-        setConns(r.data.connections || [])
-        setError('')
-      } else {
-        setError(r.error || '获取连接失败')
-      }
-    } catch {
-      setError('无法连接后端')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    fetchConns()
-    const t = setInterval(fetchConns, 3000)
-    return () => clearInterval(t)
-  }, [fetchConns])
 
   const toggleSort = (key: string) => {
     if (sortKey === key) {
@@ -150,26 +127,11 @@ export default function ConnectionsPage() {
           <span className="text-gray-600">|</span>
           <span>{conns.length} 个连接</span>
           <span className="text-gray-600">|</span>
-          <span className="text-gray-500">每 3s 刷新</span>
-          <button onClick={fetchConns} className="text-gray-400 hover:text-white transition-colors">
-            🔄
-          </button>
+          <span className="text-gray-500">实时推送</span>
         </div>
       </div>
 
-      {error && (
-        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 text-sm text-red-400 mb-4">
-          {error}
-        </div>
-      )}
-
-      {loading && conns.length === 0 && (
-        <div className="bg-[var(--surface)] rounded-xl p-8 border border-[var(--border)] text-center text-gray-400">
-          加载中...
-        </div>
-      )}
-
-      {!loading && conns.length === 0 && (
+      {conns.length === 0 && (
         <div className="bg-[var(--surface)] rounded-xl p-12 border border-[var(--border)] text-center text-gray-500 text-sm">
           暂无活动连接
         </div>

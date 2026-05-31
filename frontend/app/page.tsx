@@ -1,9 +1,9 @@
 'use client'
 
-import { useStatus } from '@/components/Sidebar'
+import { useSSE } from '@/hooks/useSSE'
 
 export default function HomePage() {
-  const status = useStatus()
+  const { status } = useSSE(['status'])
 
   return (
     <div className="max-w-4xl">

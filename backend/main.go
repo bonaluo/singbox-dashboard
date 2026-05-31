@@ -22,6 +22,9 @@ func main() {
 		log.Println("未找到配置文件，等待订阅导入...")
 	}
 
+	// 启动 SSE Hub
+	services.InitSSE()
+
 	// 注册所有路由
 	mux := http.NewServeMux()
 	handlers.Register(mux)

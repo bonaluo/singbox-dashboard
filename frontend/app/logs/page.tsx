@@ -50,6 +50,7 @@ export default function LogsPage() {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [paused, setPaused] = useState(false)
 
+  // 初始加载完整日志
   const fetchLogs = useCallback(async () => {
     try {
       const r = await api(`/api/logs?tail=${tail}`)
@@ -69,11 +70,25 @@ export default function LogsPage() {
 
   useEffect(() => {
     fetchLogs()
-    const t = setInterval(() => {
-      if (!paused) fetchLogs()
-    }, 3000)
-    return () => clearInterval(t)
-  }, [fetchLogs, paused])
+  }, [fetchLogs])
+
+  // SSE 增量推送 — 独立 EventSource，直接追加增量
+  useEffect(() => {
+    const base = typeof window !== 'undefined'
+      ? (localStorage.getItem('apiUrl') || process.env.NEXT_PUBLIC_API || 'http://10.31.3.87:9092')
+      : ''
+    const es = new EventSource(`${base}/api/events?types=logs`)
+    es.addEventListener('logs', (e: MessageEvent) => {
+      if (paused) return
+      try {
+        const d = JSON.parse(e.data)
+        if (d.content) {
+          setContent(prev => (prev + d.content).slice(-100000))
+        }
+      } catch {}
+    })
+    return () => es.close()
+  }, [paused])
 
   // 自动滚动到底部
   useEffect(() => {
