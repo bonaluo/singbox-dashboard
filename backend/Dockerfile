@@ -1,4 +1,5 @@
-FROM docker.1ms.run/library/golang:1.25-alpine AS builder
+ARG GO_IMAGE=golang:1.25-alpine
+FROM ${GO_IMAGE} AS builder
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
 ARG GIT_COMMIT=unknown

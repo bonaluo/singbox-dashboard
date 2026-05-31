@@ -1,11 +1,12 @@
-FROM docker.1ms.run/library/node:22-alpine AS builder
+ARG NODE_IMAGE=node:22-alpine
+FROM ${NODE_IMAGE} AS builder
 WORKDIR /app
 COPY package*.json ./
-RUN npm install --registry=https://registry.npmmirror.com
+RUN npm install
 COPY . .
 RUN npm run build
 
-FROM docker.1ms.run/library/node:22-alpine
+FROM ${NODE_IMAGE}
 WORKDIR /app
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static

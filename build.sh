@@ -9,17 +9,21 @@ export TAG=$(date +%y.%m.%d.%H.%M)
 # Git commit ID
 export GIT_COMMIT=$(git rev-parse --short HEAD)
 
+# 本地开发可用镜像加速，CI 自动用标准镜像
+export GO_IMAGE="${GO_IMAGE:-golang:1.25-alpine}"
+export NODE_IMAGE="${NODE_IMAGE:-node:22-alpine}"
+
 echo "=========================================="
 echo "  singbox-dashboard 构建"
 echo "  TAG:       ${TAG}"
 echo "  GIT_COMMIT: ${GIT_COMMIT}"
+echo "  GO_IMAGE:  ${GO_IMAGE}"
 echo "=========================================="
 
 ACTION=${1:-up}
 if [ "$ACTION" = "build" ]; then
   docker compose build ${2:-}
 else
-  # 默认: 构建并启动
   docker compose up -d --build ${2:-}
 fi
 

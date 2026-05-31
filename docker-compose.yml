@@ -4,6 +4,7 @@ services:
       context: ./backend
       args:
         GIT_COMMIT: ${GIT_COMMIT:-unknown}
+        GO_IMAGE: ${GO_IMAGE:-golang:1.25-alpine}
     image: singbox-backend:${TAG:-local}
     container_name: singbox-backend
     network_mode: host
@@ -21,6 +22,7 @@ services:
       context: ./frontend
       args:
         GIT_COMMIT: ${GIT_COMMIT:-unknown}
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
     image: singbox-frontend:${TAG:-local}
     container_name: singbox-frontend
     network_mode: host
