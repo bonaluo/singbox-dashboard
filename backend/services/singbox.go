@@ -21,6 +21,47 @@ import (
 var mu sync.RWMutex
 var singBoxCmd *exec.Cmd
 
+// timestampWriter 给每行写入添加时间戳前缀，解决 sing-box 日志无实际时间的问题
+type timestampWriter struct {
+	w   io.Writer
+	buf []byte // 缓存未完整的行
+}
+
+func (tw *timestampWriter) Write(p []byte) (int, error) {
+	tw.buf = append(tw.buf, p...)
+	total := len(p)
+
+	// 查找完整行并写出（带时间戳前缀）
+	for {
+		idx := indexByte(tw.buf, '\n')
+		if idx < 0 {
+			break
+		}
+		line := tw.buf[:idx+1]
+		tw.buf = tw.buf[idx+1:]
+
+		// 跳过空行
+		if len(strings.TrimSpace(string(line))) == 0 {
+			continue
+		}
+
+		// 写入时间戳 + 行内容
+		ts := time.Now().Format("2006-01-02 15:04:05 ")
+		tw.w.Write([]byte(ts))
+		tw.w.Write(line)
+	}
+	return total, nil
+}
+
+func indexByte(s []byte, c byte) int {
+	for i := range s {
+		if s[i] == c {
+			return i
+		}
+	}
+	return -1
+}
+
 // ── 启动 sing-box 进程 ──
 
 func StartSingBox() error {
@@ -31,10 +72,15 @@ func StartSingBox() error {
 		return fmt.Errorf("无法打开日志文件 %s: %w", logPath, err)
 	}
 
+	// 时间戳 writer：写入文件时自动添加时间戳
+	tsLogFile := &timestampWriter{w: logFile}
+	// 终端输出也加时间戳
+	tsStdout := &timestampWriter{w: os.Stdout}
+	tsStderr := &timestampWriter{w: os.Stderr}
+
 	singBoxCmd = exec.Command(config.SingBoxBin, "run", "-c", config.SingBoxConfig)
-	// 同时输出到终端和日志文件
-	singBoxCmd.Stdout = io.MultiWriter(os.Stdout, logFile)
-	singBoxCmd.Stderr = io.MultiWriter(os.Stderr, logFile)
+	singBoxCmd.Stdout = io.MultiWriter(tsStdout, tsLogFile)
+	singBoxCmd.Stderr = io.MultiWriter(tsStderr, tsLogFile)
 	return singBoxCmd.Start()
 }
 

@@ -27,11 +27,15 @@ function stripAnsi(text: string): string {
 }
 
 // 尝试从 sing-box 日志行中提取级别
+// 日志格式: [时间戳 ]LEVEL[offset] message  (如 2026-05-31 09:13:47 INFO[0000] ...)
+// 或者无时间戳: LEVEL[offset] message
 function detectLevel(line: string): string | null {
   // 先去掉 ANSI 码再检测
   const clean = stripAnsi(line)
   for (const lv of LOG_LEVELS) {
-    if (clean.includes(`[${lv}]`) || clean.includes(` ${lv} `) || clean.startsWith(`${lv}\t`) || clean.startsWith(`${lv} `)) {
+    // 匹配: 行首 LEVEL[ 或 时间戳 LEVEL[ (如 "INFO[0000]" 或 "2026-... INFO[0000]")
+    if (clean.startsWith(lv + '[') || clean.includes(' ' + lv + '[') ||
+        clean.includes('[' + lv + ']') || clean.includes(' ' + lv + ' ')) {
       return lv
     }
   }
@@ -49,6 +53,8 @@ export default function LogsPage() {
   const [autoScroll, setAutoScroll] = useState(true)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [paused, setPaused] = useState(false)
+  const pausedRef = useRef(false)
+  pausedRef.current = paused
 
   // 初始加载完整日志
   const fetchLogs = useCallback(async () => {
@@ -72,14 +78,14 @@ export default function LogsPage() {
     fetchLogs()
   }, [fetchLogs])
 
-  // SSE 增量推送 — 独立 EventSource，直接追加增量
+  // SSE 增量推送 — 独立 EventSource，直接追加增量；paused 用 ref 避免重连
   useEffect(() => {
     const base = typeof window !== 'undefined'
       ? (localStorage.getItem('apiUrl') || process.env.NEXT_PUBLIC_API || 'http://10.31.3.87:9092')
       : ''
     const es = new EventSource(`${base}/api/events?types=logs`)
     es.addEventListener('logs', (e: MessageEvent) => {
-      if (paused) return
+      if (pausedRef.current) return
       try {
         const d = JSON.parse(e.data)
         if (d.content) {
@@ -88,7 +94,7 @@ export default function LogsPage() {
       } catch {}
     })
     return () => es.close()
-  }, [paused])
+  }, [])
 
   // 自动滚动到底部
   useEffect(() => {
