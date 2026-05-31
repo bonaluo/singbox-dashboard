@@ -17,10 +17,24 @@ import (
 // ═══════════════════════════════════════════════════════════
 
 var mu sync.RWMutex
+var singBoxCmd *exec.Cmd
+
+// ── 启动 sing-box 进程 ──
+
+func StartSingBox() error {
+	singBoxCmd = exec.Command(config.SingBoxBin, "run", "-c", config.SingBoxConfig)
+	singBoxCmd.Stdout = os.Stdout
+	singBoxCmd.Stderr = os.Stderr
+	return singBoxCmd.Start()
+}
 
 // ── 服务状态 ──
 
 func GetStatus() models.StatusResponse {
+	// 配置文件不存在时快速返回
+	if _, err := os.Stat(config.SingBoxConfig); os.IsNotExist(err) {
+		return models.StatusResponse{Running: false}
+	}
 	cfg, _ := loadSingBoxConfig()
 	current := getClashCurrent()
 	running := isRunning()
@@ -125,12 +139,13 @@ func GetConnections() []map[string]interface{} {
 func RestartService() error {
 	mu.Lock()
 	defer mu.Unlock()
-	cmd := exec.Command("systemctl", "--user", "restart", config.SingBoxSvc)
-	if err := cmd.Run(); err != nil {
-		return err
+	if singBoxCmd == nil || singBoxCmd.Process == nil {
+		return StartSingBox()
 	}
-	time.Sleep(2 * time.Second)
-	return nil
+	singBoxCmd.Process.Kill()
+	singBoxCmd.Wait()
+	time.Sleep(1 * time.Second)
+	return StartSingBox()
 }
 
 // ── 读写 sing-box 配置 ──
@@ -178,16 +193,12 @@ func loadSingBoxConfig() (map[string]interface{}, error) {
 }
 
 func isRunning() bool {
-	cmd := exec.Command("systemctl", "--user", "is-active", config.SingBoxSvc)
-	out, _ := cmd.Output()
-	return strings.TrimSpace(string(out)) == "active"
+	cmd := exec.Command("curl", "-s", "--max-time", "2", config.ClashAPI+"/version")
+	return cmd.Run() == nil
 }
 
 func getUptime() string {
-	cmd := exec.Command("systemctl", "--user", "show", config.SingBoxSvc,
-		"--property=ActiveEnterTimestamp")
-	out, _ := cmd.Output()
-	return strings.TrimSpace(strings.Replace(string(out), "ActiveEnterTimestamp=", "", 1))
+	return ""
 }
 
 func detectRegion(tag string) string {

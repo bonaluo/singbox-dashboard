@@ -6,12 +6,21 @@ import (
 	"os"
 	"singbox-dashboard/config"
 	"singbox-dashboard/handlers"
+	"singbox-dashboard/services"
 	"strings"
 )
 
 func main() {
 	// 确保数据目录存在
 	os.MkdirAll(config.DataDir, 0755)
+
+	// 仅当配置文件存在时才启动 sing-box
+	if _, err := os.Stat(config.SingBoxConfig); err == nil {
+		log.Println("启动 sing-box ...")
+		services.StartSingBox()
+	} else {
+		log.Println("未找到配置文件，等待订阅导入...")
+	}
 
 	// 注册所有路由
 	mux := http.NewServeMux()

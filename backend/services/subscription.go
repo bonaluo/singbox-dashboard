@@ -89,10 +89,30 @@ func DeleteSubscription(id string) error {
 		return fmt.Errorf("subscription not found: %s", id)
 	}
 	store.Subscriptions = newSubs
-	return SaveSubscriptions(store)
+	if err := SaveSubscriptions(store); err != nil {
+		return err
+	}
+	// 清理缓存数据
+	os.Remove(filepath.Join(config.DataDir, "subscription_data", id+".json"))
+	// 清理配置文件中的节点，回退到空配置或直接删除
+	os.Remove(config.SingBoxConfig)
+	return nil
 }
 
 // ── 拉取订阅原始数据 ──
+
+// GetCachedSubscriptionData 读取缓存的订阅解析数据
+func GetCachedSubscriptionData(id string) (*FetchResult, error) {
+	data, err := os.ReadFile(filepath.Join(config.DataDir, "subscription_data", id+".json"))
+	if err != nil {
+		return nil, fmt.Errorf("请先拉取解析: %w", err)
+	}
+	var cached FetchResult
+	if err := json.Unmarshal(data, &cached); err != nil {
+		return nil, fmt.Errorf("缓存数据损坏: %w", err)
+	}
+	return &cached, nil
+}
 
 type FetchResult struct {
 	RawText    string            `json:"raw_text"`
@@ -100,6 +120,51 @@ type FetchResult struct {
 	NodeCount  int               `json:"node_count"`
 	Nodes      []models.ProxyNode `json:"nodes"`
 	UpdatedAt  string            `json:"updated_at"`
+}
+
+// FetchRaw 拉取订阅原始数据（不依赖已有记录）
+func FetchRaw(subURL string) (string, error) {
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	client := &http.Client{Transport: tr, Timeout: 30 * time.Second}
+	resp, err := client.Get(subURL)
+	if err != nil {
+		return "", fmt.Errorf("拉取失败: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("读取失败: %w", err)
+	}
+	return string(raw), nil
+}
+
+// ParseRaw 解析订阅原始数据
+func ParseRaw(raw string) *FetchResult {
+	decoded, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		decoded = []byte(raw)
+	}
+	text := string(decoded)
+	lines := strings.Split(strings.TrimSpace(text), "\n")
+	nodes := parseSubscriptionLines(lines)
+	result := &FetchResult{
+		RawText:   text,
+		RawLines:  lines,
+		NodeCount: len(nodes),
+		Nodes:     nodes,
+		UpdatedAt: time.Now().Format("2006-01-02 15:04:05"),
+	}
+	return result
+}
+
+// SaveFetchResult 保存解析结果缓存
+func SaveFetchResult(id string, result *FetchResult) error {
+	dir := filepath.Join(config.DataDir, "subscription_data")
+	os.MkdirAll(dir, 0755)
+	data, _ := json.MarshalIndent(result, "", "  ")
+	return os.WriteFile(filepath.Join(dir, id+".json"), data, 0644)
 }
 
 func FetchAndParseSubscription(id string) (*FetchResult, error) {
@@ -188,17 +253,30 @@ func ApplySubscription(id string) error {
 
 	cfg, err := loadSingBoxConfig()
 	if err != nil {
-		return err
+		// 无配置文件时生成最小模板
+		cfg = map[string]interface{}{
+			"log":      map[string]interface{}{"level": "info"},
+			"inbounds": []interface{}{map[string]interface{}{
+				"type": "mixed", "tag": "mixed-in",
+				"listen": "0.0.0.0", "listen_port": 2080,
+			}},
+			"outbounds": []interface{}{},
+			"route":     map[string]interface{}{"auto_detect_interface": true},
+			"experimental": map[string]interface{}{
+				"clash_api": map[string]interface{}{
+					"external_controller": "0.0.0.0:9090",
+				},
+			},
+		}
 	}
 
 	var newOutbounds []interface{}
 	for _, n := range cached.Nodes {
 		ob := map[string]interface{}{
-			"type":            n.Type,
-			"tag":             n.Tag,
-			"server":          n.Server,
-			"server_port":     n.Port,
-			"domain_resolver": "dns-local",
+			"type":        n.Type,
+			"tag":         n.Tag,
+			"server":      n.Server,
+			"server_port": n.Port,
 		}
 		// 从 raw_link 解析完整 vmess 配置
 		if n.RawLink != "" && strings.HasPrefix(n.RawLink, "vmess://") {
@@ -256,11 +334,15 @@ func ApplySubscription(id string) error {
 		"default":   tags[0],
 	})
 	newOutbounds = append(newOutbounds, map[string]interface{}{
-		"type": "direct", "tag": "direct", "domain_resolver": "dns-local",
+		"type": "direct", "tag": "direct",
 	})
 
 	cfg["outbounds"] = newOutbounds
-	return WriteSingBoxConfig(cfg)
+	if err := WriteSingBoxConfig(cfg); err != nil {
+		return err
+	}
+	// 写完后启动/重启 sing-box
+	return RestartService()
 }
 
 // ── 解析 vmess:// / ss:// 等链接 ──

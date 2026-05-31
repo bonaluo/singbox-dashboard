@@ -26,6 +26,7 @@ func Register(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/subscriptions/{id}", handleDeleteSubscription)
 	mux.HandleFunc("POST /api/subscriptions/{id}/fetch", handleFetchSubscription)
 	mux.HandleFunc("POST /api/subscriptions/{id}/apply", handleApplySubscription)
+	mux.HandleFunc("GET /api/subscriptions/{id}/data", handleGetSubscriptionData)
 
 	// ── 规则 ──
 	mux.HandleFunc("GET /api/rules", handleListRules)
@@ -118,12 +119,30 @@ func handleAddSubscription(w http.ResponseWriter, r *http.Request) {
 		sendError(w, 400, "name and url required")
 		return
 	}
+	// 先尝试拉取验证
+	raw, err := services.FetchRaw(url)
+	if err != nil {
+		sendError(w, 400, "订阅地址不可达: "+err.Error())
+		return
+	}
+	// 解析验证
+	result := services.ParseRaw(raw)
+	if result.NodeCount == 0 {
+		sendError(w, 400, "未解析到有效节点")
+		return
+	}
+	// 保存订阅
 	sub, err := services.AddSubscription(name, url)
 	if err != nil {
 		sendError(w, 500, err.Error())
 		return
 	}
-	sendOK(w, sub)
+	// 保存缓存数据
+	services.SaveFetchResult(sub.ID, result)
+	sendOK(w, map[string]interface{}{
+		"subscription": sub,
+		"result":       result,
+	})
 }
 
 func handleDeleteSubscription(w http.ResponseWriter, r *http.Request) {
@@ -153,6 +172,16 @@ func handleApplySubscription(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = services.RestartService()
 	sendOK(w, map[string]string{"msg": "订阅已应用，服务已重启"})
+}
+
+func handleGetSubscriptionData(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	data, err := services.GetCachedSubscriptionData(id)
+	if err != nil {
+		sendError(w, 404, err.Error())
+		return
+	}
+	sendOK(w, data)
 }
 
 func handleListRules(w http.ResponseWriter, r *http.Request) {
