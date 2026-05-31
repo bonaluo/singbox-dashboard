@@ -1,13 +1,10 @@
-# 生产部署 compose 文件 — 直接使用预构建镜像，无需本地编译
-#
-# 镜像托管于 GitHub Container Registry (ghcr.io)
-# 镜像由 CI/CD 自动构建或在开发环境通过 ./build.sh && ./push.sh 推送
+# 生产部署 compose 文件 — 直接拉取预构建镜像，无需本地编译
 #
 # 启动: docker compose -f docker-compose.prod.yml up -d
 #
 services:
   backend:
-    image: ghcr.io/bonaluo/singbox-dashboard-backend:latest
+    image: bonaluo/singbox-dashboard-backend:latest
     container_name: singbox-backend
     network_mode: host
     volumes:
@@ -19,7 +16,7 @@ services:
     restart: unless-stopped
 
   frontend:
-    image: ghcr.io/bonaluo/singbox-dashboard-frontend:latest
+    image: bonaluo/singbox-dashboard-frontend:latest
     container_name: singbox-frontend
     network_mode: host
     environment:
