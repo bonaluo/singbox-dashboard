@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"singbox-dashboard/models"
@@ -38,6 +39,9 @@ func Register(mux *http.ServeMux) {
 
 	// ── 配置 ──
 	mux.HandleFunc("GET /api/config", handleGetConfig)
+
+	// ── 日志 ──
+	mux.HandleFunc("GET /api/logs", handleGetLogs)
 
 	// ── 连接 ──
 	mux.HandleFunc("GET /api/connections", handleConnections)
@@ -250,6 +254,23 @@ func handleRuleOptions(w http.ResponseWriter, r *http.Request) {
 	sendOK(w, map[string]interface{}{
 		"rule_types": types,
 		"outbounds":  options,
+	})
+}
+
+func handleGetLogs(w http.ResponseWriter, r *http.Request) {
+	lines := 500
+	if n, err := fmt.Sscanf(r.URL.Query().Get("tail"), "%d", &lines); n != 1 || err != nil {
+		lines = 500
+	}
+	content, logPath, err := services.GetLogs(lines)
+	if err != nil {
+		sendError(w, 500, "读取日志失败: "+err.Error())
+		return
+	}
+	sendOK(w, map[string]interface{}{
+		"content": content,
+		"path":    logPath,
+		"tail":    lines,
 	})
 }
 

@@ -338,6 +338,14 @@ func ApplySubscription(id string) error {
 	})
 
 	cfg["outbounds"] = newOutbounds
+
+	// 清理可能残留的无效 default_domain_resolver
+	if route, ok := cfg["route"].(map[string]interface{}); ok {
+		if route["default_domain_resolver"] == "dns-local" {
+			delete(route, "default_domain_resolver")
+		}
+	}
+
 	if err := WriteSingBoxConfig(cfg); err != nil {
 		return err
 	}

@@ -32,5 +32,6 @@ func envOrDefault(key, fallback string) string {
 	return fallback
 }
 
+func LogPath() string           { return filepath.Join(DataDir, "sing-box.log") }
 func SubscriptionsPath() string  { return filepath.Join(DataDir, "subscriptions.json") }
 func RulesPath() string          { return filepath.Join(DataDir, "rules.json") }

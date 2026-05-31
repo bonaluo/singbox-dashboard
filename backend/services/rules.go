@@ -6,6 +6,7 @@ import (
 	"os"
 	"singbox-dashboard/config"
 	"singbox-dashboard/models"
+	"strings"
 	"time"
 )
 
@@ -101,6 +102,51 @@ func DeleteRule(id string) error {
 
 // ── 将 rules 应用到 sing-box 配置 ──
 
+// singBoxRuleKeys 定义 condition type → sing-box rule key 的映射
+// 大多数字段名与 sing-box 配置 key 一致，此处列出需要特殊处理的
+var singBoxRuleKeys = map[string]string{
+	"domain":                  "domain",
+	"domain_suffix":           "domain_suffix",
+	"domain_keyword":          "domain_keyword",
+	"domain_regex":            "domain_regex",
+	"geosite":                 "geosite",
+	"geoip":                   "geoip",
+	"source_geoip":            "source_geoip",
+	"ip_cidr":                 "ip_cidr",
+	"source_ip_cidr":          "source_ip_cidr",
+	"ip_is_private":           "ip_is_private",
+	"source_ip_is_private":    "source_ip_is_private",
+	"port":                    "port",
+	"port_range":              "port_range",
+	"source_port":             "source_port",
+	"source_port_range":       "source_port_range",
+	"process_name":            "process_name",
+	"process_path":            "process_path",
+	"process_path_regex":      "process_path_regex",
+	"package_name":            "package_name",
+	"package_name_regex":      "package_name_regex",
+	"user":                    "user",
+	"user_id":                 "user_id",
+	"inbound":                 "inbound",
+	"network":                 "network",
+	"network_type":            "network_type",
+	"network_is_expensive":    "network_is_expensive",
+	"network_is_constrained":  "network_is_constrained",
+	"protocol":                "protocol",
+	"client":                  "client",
+	"auth_user":               "auth_user",
+	"ip_version":              "ip_version",
+	"clash_mode":              "clash_mode",
+	"wifi_ssid":               "wifi_ssid",
+	"wifi_bssid":              "wifi_bssid",
+	"rule_set":                "rule_set",
+	"rule_set_ipcidr_match_source":  "rule_set_ipcidr_match_source",
+	"rule_set_ip_cidr_match_source": "rule_set_ip_cidr_match_source",
+	"source_mac_address":      "source_mac_address",
+	"source_hostname":         "source_hostname",
+	"preferred_by":            "preferred_by",
+}
+
 func ApplyRules() error {
 	store, err := LoadRules()
 	if err != nil {
@@ -111,39 +157,83 @@ func ApplyRules() error {
 		return err
 	}
 
-	// 构建 route.rules
 	var rules []map[string]interface{}
 	for _, r := range store.Rules {
 		if !r.Enabled {
 			continue
 		}
-		rule := map[string]interface{}{
-			"outbound": r.Outbound,
+
+		rule := map[string]interface{}{}
+
+		// 处理条件（新格式优先，兼容旧格式 Type+Value）
+		conditions := r.MigrateConditions()
+		for _, cond := range conditions {
+			if cond.Type == "" || len(cond.Values) == 0 {
+				continue
+			}
+			key, ok := singBoxRuleKeys[cond.Type]
+			if !ok {
+				key = cond.Type // 透传未知字段
+			}
+
+			// 特殊处理：geosite/geoip 在 sing-box 1.12+ 中已移除原生字段
+			// 必须通过 rule_set 前缀引用，如 geosite-cn, geoip-cn
+			if cond.Type == "geosite" {
+				var prefixed []string
+				for _, v := range cond.Values {
+					prefixed = append(prefixed, "geosite-"+strings.TrimSpace(v))
+				}
+				rule["rule_set"] = prefixed
+			} else if cond.Type == "geoip" {
+				var prefixed []string
+				for _, v := range cond.Values {
+					prefixed = append(prefixed, "geoip-"+strings.TrimSpace(v))
+				}
+				rule["rule_set"] = prefixed
+			} else if cond.Type == "port" || cond.Type == "source_port" || cond.Type == "user_id" || cond.Type == "ip_version" {
+				// 数字类型字段：尝试解析为数字，失败则保留字符串
+				var nums []interface{}
+				for _, v := range cond.Values {
+					var n int
+					if _, err := fmt.Sscanf(v, "%d", &n); err == nil {
+						nums = append(nums, n)
+					} else {
+						nums = append(nums, v)
+					}
+				}
+				if len(nums) > 0 {
+					rule[key] = nums
+				}
+			} else if cond.Type == "network_is_expensive" || cond.Type == "network_is_constrained" ||
+				cond.Type == "ip_is_private" || cond.Type == "source_ip_is_private" ||
+				cond.Type == "rule_set_ipcidr_match_source" || cond.Type == "rule_set_ip_cidr_match_source" {
+				// 布尔类型字段
+				v := strings.ToLower(cond.Values[0])
+				rule[key] = v == "true" || v == "1"
+			} else if cond.Type == "clash_mode" {
+				// 字符串单值
+				rule[key] = cond.Values[0]
+			} else {
+				// 默认：字符串数组
+				rule[key] = cond.Values
+			}
 		}
 
-		switch r.Type {
-		case models.RuleDomain:
-			rule["domain"] = []string{r.Value}
-		case models.RuleDomainSuffix:
-			rule["domain_suffix"] = []string{r.Value}
-		case models.RuleDomainKeyword:
-			rule["domain_keyword"] = []string{r.Value}
-		case models.RuleIPCIDR:
-			rule["ip_cidr"] = []string{r.Value}
-		case models.RuleGeosite:
-			rule["rule_set"] = fmt.Sprintf("geosite-%s", r.Value) // 简化
+		// action / outbound
+		action := r.GetAction()
+		rule["action"] = action
+		if action == "route" && r.Outbound != "" {
 			rule["outbound"] = r.Outbound
-		case models.RuleGeoIP:
-			rule["rule_set"] = fmt.Sprintf("geoip-%s", r.Value)
-			rule["outbound"] = r.Outbound
-		case models.RuleProcessName:
-			rule["process_name"] = []string{r.Value}
+		}
+
+		// invert
+		if r.Invert {
+			rule["invert"] = true
 		}
 
 		rules = append(rules, rule)
 	}
 
-	// 只更新 route.rules + final，保留 rule_set 等
 	route, ok := cfg["route"].(map[string]interface{})
 	if !ok {
 		route = make(map[string]interface{})
@@ -151,9 +241,73 @@ func ApplyRules() error {
 	}
 	route["rules"] = rules
 	route["final"] = "proxy"
-	if _, has := route["default_domain_resolver"]; !has {
-		route["default_domain_resolver"] = "dns-local"
+
+	// 自动补全 rule_set 定义：收集所有引用的 rule_set tag
+	ruleSetTags := make(map[string]bool)
+	for _, r := range rules {
+		if rs, ok := r["rule_set"]; ok {
+			switch v := rs.(type) {
+			case []string:
+				for _, t := range v {
+					ruleSetTags[t] = true
+				}
+			case string:
+				ruleSetTags[v] = true
+			case []interface{}:
+				for _, t := range v {
+					if s, ok := t.(string); ok {
+						ruleSetTags[s] = true
+					}
+				}
+			}
+		}
 	}
+
+	// 重建 rule_set 定义：只保留当前规则引用的 + 已有的非 geosite/geoip 类型
+	var ruleSetDefs []interface{}
+	if existingRS, ok := route["rule_set"].([]interface{}); ok {
+		for _, rs := range existingRS {
+			if m, ok := rs.(map[string]interface{}); ok {
+				if t, ok := m["tag"].(string); ok {
+					// 保留被当前规则引用的，以及非 geosite/geoip 前缀的（用户自定义的）
+					if ruleSetTags[t] || (!strings.HasPrefix(t, "geosite-") && !strings.HasPrefix(t, "geoip-")) {
+						ruleSetDefs = append(ruleSetDefs, rs)
+					}
+				}
+			}
+		}
+	}
+
+	// 添加新的 rule_set 定义（当前规则引用但还没有定义的）
+	for tag := range ruleSetTags {
+		found := false
+		for _, rs := range ruleSetDefs {
+			if m, ok := rs.(map[string]interface{}); ok {
+				if t, ok := m["tag"].(string); ok && t == tag {
+					found = true
+					break
+				}
+			}
+		}
+		if !found {
+			tagLower := strings.ToLower(tag)
+			var url string
+			if strings.HasPrefix(tagLower, "geosite-") {
+				url = "https://github.com/SagerNet/sing-geosite/releases/latest/download/" + tag + ".srs"
+			} else if strings.HasPrefix(tagLower, "geoip-") {
+				url = "https://github.com/SagerNet/sing-geoip/releases/latest/download/" + tag + ".srs"
+			}
+			if url != "" {
+				ruleSetDefs = append(ruleSetDefs, map[string]interface{}{
+					"tag":    tag,
+					"type":   "remote",
+					"format": "binary",
+					"url":    url,
+				})
+			}
+		}
+	}
+	route["rule_set"] = ruleSetDefs
 
 	return WriteSingBoxConfig(cfg)
 }

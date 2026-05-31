@@ -1,8 +1,10 @@
 package services
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"singbox-dashboard/config"
@@ -22,9 +24,17 @@ var singBoxCmd *exec.Cmd
 // ── 启动 sing-box 进程 ──
 
 func StartSingBox() error {
+	// 打开日志文件（追加模式）
+	logPath := config.LogPath()
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return fmt.Errorf("无法打开日志文件 %s: %w", logPath, err)
+	}
+
 	singBoxCmd = exec.Command(config.SingBoxBin, "run", "-c", config.SingBoxConfig)
-	singBoxCmd.Stdout = os.Stdout
-	singBoxCmd.Stderr = os.Stderr
+	// 同时输出到终端和日志文件
+	singBoxCmd.Stdout = io.MultiWriter(os.Stdout, logFile)
+	singBoxCmd.Stderr = io.MultiWriter(os.Stderr, logFile)
 	return singBoxCmd.Start()
 }
 
@@ -306,4 +316,33 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return os.WriteFile(dst, data, 0644)
+}
+
+// ── 日志读取 ──
+
+// GetLogs 从日志文件读取最后 lines 行（0 或负数则读取全部），同时返回日志文件路径
+func GetLogs(lines int) (string, string, error) {
+	logPath := config.LogPath()
+	f, err := os.Open(logPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", logPath, nil
+		}
+		return "", logPath, err
+	}
+	defer f.Close()
+
+	var allLines []string
+	scanner := bufio.NewScanner(f)
+	// 增大 buffer 以处理长日志行
+	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
+	for scanner.Scan() {
+		allLines = append(allLines, scanner.Text())
+	}
+
+	if lines > 0 && len(allLines) > lines {
+		allLines = allLines[len(allLines)-lines:]
+	}
+
+	return strings.Join(allLines, "\n"), logPath, nil
 }
