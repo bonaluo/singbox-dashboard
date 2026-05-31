@@ -38,10 +38,40 @@ export default function ConfigPage() {
 
   const copyConfig = () => {
     const text = JSON.stringify(config, null, 2)
-    navigator.clipboard.writeText(text).then(() => {
+
+    // 优先使用现代 Clipboard API（仅在安全上下文可用）
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(() => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      }).catch(() => {
+        // Clipboard API 失败时回退到 execCommand
+        fallbackCopy(text)
+      })
+    } else {
+      // 非安全上下文（HTTP）回退方案
+      fallbackCopy(text)
+    }
+  }
+
+  const fallbackCopy = (text: string) => {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.left = '-9999px'
+    ta.style.top = '-9999px'
+    document.body.appendChild(ta)
+    ta.focus()
+    ta.select()
+    try {
+      document.execCommand('copy')
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
-    })
+    } catch {
+      // 静默失败 — 用户可手动选择复制
+    } finally {
+      document.body.removeChild(ta)
+    }
   }
 
   const configSize = config ? JSON.stringify(config, null, 2).length : 0
