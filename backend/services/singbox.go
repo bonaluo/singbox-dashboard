@@ -259,7 +259,7 @@ func loadSingBoxConfig() (map[string]interface{}, error) {
 }
 
 func isRunning() bool {
-	cmd := exec.Command("curl", "-s", "--max-time", "2", config.ClashAPI+"/version")
+	cmd := exec.Command("curl", "-s", "--noproxy", "*", "--max-time", "2", config.ClashAPI+"/version")
 	return cmd.Run() == nil
 }
 

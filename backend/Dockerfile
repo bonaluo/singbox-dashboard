@@ -1,9 +1,6 @@
 ARG GO_IMAGE=golang:1.25-alpine
 FROM ${GO_IMAGE} AS builder
-ARG HTTP_PROXY
-ARG HTTPS_PROXY
 ARG GIT_COMMIT=unknown
-ENV HTTP_PROXY=$HTTP_PROXY HTTPS_PROXY=$HTTPS_PROXY
 WORKDIR /app
 COPY go.mod main.go ./
 COPY config/ config/

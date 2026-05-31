@@ -2,7 +2,6 @@ services:
   backend:
     build:
       context: ./backend
-      network: host
       args:
         GIT_COMMIT: ${GIT_COMMIT:-unknown}
         GO_IMAGE: ${GO_IMAGE:-golang:1.25-alpine}
@@ -21,7 +20,6 @@ services:
   frontend:
     build:
       context: ./frontend
-      network: host
       args:
         GIT_COMMIT: ${GIT_COMMIT:-unknown}
         NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
