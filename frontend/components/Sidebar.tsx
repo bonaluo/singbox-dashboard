@@ -70,6 +70,9 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
             {status.total_nodes > 0 && <div>{status.total_nodes} 个节点</div>}
           </div>
         )}
+        <div className="p-2 border-t border-[var(--border)] text-[10px] text-gray-600 text-center">
+          {status?.git_commit ? `#${status.git_commit}` : ''}
+        </div>
       </aside>
 
       {/* Main */}

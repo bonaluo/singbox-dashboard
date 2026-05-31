@@ -269,8 +269,22 @@ func ApplyRules() error {
 		for _, rs := range existingRS {
 			if m, ok := rs.(map[string]interface{}); ok {
 				if t, ok := m["tag"].(string); ok {
-					// 保留被当前规则引用的，以及非 geosite/geoip 前缀的（用户自定义的）
-					if ruleSetTags[t] || (!strings.HasPrefix(t, "geosite-") && !strings.HasPrefix(t, "geoip-")) {
+					// 保留被当前规则引用的，补上 download_detour + 修正 URL
+					if ruleSetTags[t] {
+						// geosite/geoip 类型：确保 download_detour + 使用正确的 raw/rule-set URL
+						if strings.HasPrefix(t, "geosite-") || strings.HasPrefix(t, "geoip-") {
+							if m["download_detour"] == nil {
+								m["download_detour"] = "proxy"
+							}
+							// 更新为正确的 raw/rule-set URL（修正旧版 releases/latest/download）
+							oldURL, _ := m["url"].(string)
+							if strings.Contains(oldURL, "releases/latest/download") {
+								m["url"] = strings.Replace(oldURL, "releases/latest/download", "raw/rule-set", 1)
+							}
+						}
+						ruleSetDefs = append(ruleSetDefs, rs)
+					} else if !strings.HasPrefix(t, "geosite-") && !strings.HasPrefix(t, "geoip-") {
+						// 非 geosite/geoip 的用户自定义 rule_set 始终保留
 						ruleSetDefs = append(ruleSetDefs, rs)
 					}
 				}
@@ -293,9 +307,9 @@ func ApplyRules() error {
 			tagLower := strings.ToLower(tag)
 			var url string
 			if strings.HasPrefix(tagLower, "geosite-") {
-				url = "https://github.com/SagerNet/sing-geosite/releases/latest/download/" + tag + ".srs"
+				url = "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/" + tag + ".srs"
 			} else if strings.HasPrefix(tagLower, "geoip-") {
-				url = "https://github.com/SagerNet/sing-geoip/releases/latest/download/" + tag + ".srs"
+				url = "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/" + tag + ".srs"
 			}
 			if url != "" {
 				ruleSetDefs = append(ruleSetDefs, map[string]interface{}{
@@ -303,6 +317,7 @@ func ApplyRules() error {
 					"type":   "remote",
 					"format": "binary",
 					"url":    url,
+						"download_detour": "proxy",
 				})
 			}
 		}

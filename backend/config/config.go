@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 )
 
+// GitCommit 由构建时注入（ldflags），运行时获取
+var GitCommit = "unknown"
+
 var (
 	// SingBox paths
 	SingBoxConfig = envOrDefault("SINGBOX_CONFIG", "/home/xfy/sing-box-config.json")

@@ -80,6 +80,7 @@ type StatusResponse struct {
 	Uptime     string `json:"uptime,omitempty"`
 	TotalNodes int    `json:"total_nodes"`
 	Version    string `json:"version,omitempty"`
+	GitCommit  string `json:"git_commit,omitempty"`
 }
 
 // ── API responses ──

@@ -1,7 +1,10 @@
 services:
   backend:
-    build: ./backend
-    image: singbox-backend:local
+    build:
+      context: ./backend
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+    image: singbox-backend:${TAG:-local}
     container_name: singbox-backend
     network_mode: host
     volumes:
@@ -10,16 +13,21 @@ services:
       - SINGBOX_CONFIG=/data/sing-box-config.json
       - CLASH_API=http://127.0.0.1:9090
       - DASHBOARD_DATA_DIR=/data
+      - GIT_COMMIT=${GIT_COMMIT:-unknown}
     restart: unless-stopped
 
   frontend:
-    build: ./frontend
-    image: singbox-frontend:local
+    build:
+      context: ./frontend
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+    image: singbox-frontend:${TAG:-local}
     container_name: singbox-frontend
     network_mode: host
     environment:
       - HOSTNAME=0.0.0.0
       - PORT=9000
+      - NEXT_PUBLIC_GIT_COMMIT=${GIT_COMMIT:-unknown}
     restart: unless-stopped
     depends_on:
       - backend

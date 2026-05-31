@@ -113,6 +113,7 @@ func GetStatus() models.StatusResponse {
 		Current:    current,
 		Uptime:     uptime,
 		TotalNodes: total,
+		GitCommit:  config.GitCommit,
 	}
 }
 

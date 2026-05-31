@@ -39,6 +39,7 @@ func main() {
 	log.Printf("   监听: http://%s", config.ListenAddr)
 	log.Printf("   sing-box 配置: %s", config.SingBoxConfig)
 	log.Printf("   数据目录: %s", config.DataDir)
+	log.Printf("   Git 提交: %s", config.GitCommit)
 	log.Println("   ────────────────────────────────────────")
 
 	if err := srv.ListenAndServe(); err != nil {
