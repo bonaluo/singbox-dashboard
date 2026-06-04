@@ -253,7 +253,7 @@ func handleApplyRules(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleRuleOptions(w http.ResponseWriter, r *http.Request) {
-	options := services.GetOutboundOptions()
+	options := services.GetEnrichedOutbounds()
 	types := []string{"domain", "domain-suffix", "domain-keyword", "ip-cidr", "geosite", "geoip", "process-name"}
 	sendOK(w, map[string]interface{}{
 		"rule_types": types,

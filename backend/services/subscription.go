@@ -311,21 +311,37 @@ func ApplySubscription(id string) error {
 	}
 
 	// 构建 selector，排除非代理行（tag 含流量/套餐/到期/剩余/过滤等）
+	// 同时按地区分组，用于后续生成地区 urltest 出站
 	var tags []string
+	regionGroups := make(map[string][]string)
+	infoKws := []string{"流量", "套餐", "到期", "剩余", "过滤"}
 	for _, n := range cached.Nodes {
-		if n.Type == "vmess" {
-			infoKws := []string{"流量", "套餐", "到期", "剩余", "过滤"}
-			skip := false
-			for _, kw := range infoKws {
-				if strings.Contains(n.Tag, kw) {
-					skip = true
-					break
-				}
-			}
-			if !skip {
-				tags = append(tags, n.Tag)
+		if n.Type != "vmess" {
+			continue
+		}
+		skip := false
+		for _, kw := range infoKws {
+			if strings.Contains(n.Tag, kw) {
+				skip = true
+				break
 			}
 		}
+		if skip {
+			continue
+		}
+		tags = append(tags, n.Tag)
+
+		// 按地区归类
+		region := detectRegion(n.Tag)
+		if region == "其他" {
+			continue
+		}
+		// detectRegion 返回 "🇺🇸 美国" 格式，取空格后的中文名
+		name := region
+		if idx := strings.Index(region, " "); idx > 0 {
+			name = region[idx+1:]
+		}
+		regionGroups[name] = append(regionGroups[name], n.Tag)
 	}
 	tags = append(tags, "direct")
 	newOutbounds = append(newOutbounds, map[string]interface{}{
@@ -336,6 +352,18 @@ func ApplySubscription(id string) error {
 	newOutbounds = append(newOutbounds, map[string]interface{}{
 		"type": "direct", "tag": "direct",
 	})
+
+	// 按地区生成 urltest 出站组（自动选延迟最低节点，支持按域名分流）
+	for name, regionTags := range regionGroups {
+		if len(regionTags) == 0 {
+			continue
+		}
+		newOutbounds = append(newOutbounds, map[string]interface{}{
+			"type":      "urltest",
+			"tag":       name,
+			"outbounds": regionTags,
+		})
+	}
 
 	cfg["outbounds"] = newOutbounds
 

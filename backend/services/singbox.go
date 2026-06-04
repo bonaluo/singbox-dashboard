@@ -148,6 +148,82 @@ func GetProxies() []models.ProxyNode {
 	return nodes
 }
 
+// ── 获取全部出站（含组和节点）──
+
+// GetAllOutbounds 从 sing-box 配置读取全部出站（不过滤类型），返回 tag+type
+func GetAllOutbounds() []models.OutboundOption {
+	cfg, err := loadSingBoxConfig()
+	if err != nil {
+		return nil
+	}
+	var outbounds []models.OutboundOption
+	for _, ob := range cfg["outbounds"].([]interface{}) {
+		m := ob.(map[string]interface{})
+		tag, _ := m["tag"].(string)
+		t, _ := m["type"].(string)
+		if tag == "" {
+			continue
+		}
+		outbounds = append(outbounds, models.OutboundOption{
+			Tag:  tag,
+			Type: t,
+		})
+	}
+	return outbounds
+}
+
+// GetGroupNow 通过 Clash API 获取 selector/urltest 组当前选中的节点
+func GetGroupNow(tag string) string {
+	cmd := exec.Command("curl", "-s", "--noproxy", "*", "--max-time", "5",
+		config.ClashAPI+"/proxies/"+tag)
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	var result struct {
+		Now string `json:"now"`
+	}
+	json.Unmarshal(out, &result)
+	return result.Now
+}
+
+// GetGroupDelays 通过 Clash API 获取 urltest 组中每个节点的最新延迟
+func GetGroupDelays(tag string) map[string]int {
+	cmd := exec.Command("curl", "-s", "--noproxy", "*", "--max-time", "5",
+		config.ClashAPI+"/proxies/"+tag)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	var result struct {
+		All []json.RawMessage `json:"all"`
+	}
+	if err := json.Unmarshal(out, &result); err != nil {
+		return nil
+	}
+	delays := make(map[string]int)
+	for _, item := range result.All {
+		// "all" 数组元素可能是纯字符串（Selector）或对象（URLTest，含 history）
+		var nameOnly string
+		if json.Unmarshal(item, &nameOnly) == nil {
+			continue
+		}
+		var nodeObj struct {
+			Name    string `json:"name"`
+			History []struct {
+				Delay int `json:"delay"`
+			} `json:"history"`
+		}
+		if json.Unmarshal(item, &nodeObj) != nil {
+			continue
+		}
+		if len(nodeObj.History) > 0 {
+			delays[nodeObj.Name] = nodeObj.History[len(nodeObj.History)-1].Delay
+		}
+	}
+	return delays
+}
+
 // ── 切换节点 ──
 
 func SwitchProxy(tag string) error {

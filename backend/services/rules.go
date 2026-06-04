@@ -337,3 +337,41 @@ func GetOutboundOptions() []string {
 	}
 	return options
 }
+
+// GetEnrichedOutbounds 返回增强的出站选项列表（含类型、当前节点、延迟）
+// 用于规则页面的出站下拉选择
+func GetEnrichedOutbounds() []models.OutboundOption {
+	all := GetAllOutbounds()
+	if all == nil {
+		return nil
+	}
+	var result []models.OutboundOption
+	for _, ob := range all {
+		enriched := ob
+		if ob.Type == "selector" || ob.Type == "urltest" {
+			now := GetGroupNow(ob.Tag)
+			enriched.Now = now
+
+			// urltest：取当前节点的延迟
+			if ob.Type == "urltest" {
+				delays := GetGroupDelays(ob.Tag)
+				if now != "" {
+					if d, ok := delays[now]; ok {
+						enriched.Delay = d
+					}
+				}
+				// 未取到当前节点延迟时，尝试取任意可用延迟
+				if enriched.Delay == 0 && len(delays) > 0 {
+					for _, d := range delays {
+						if d > 0 {
+							enriched.Delay = d
+							break
+						}
+					}
+				}
+			}
+		}
+		result = append(result, enriched)
+	}
+	return result
+}

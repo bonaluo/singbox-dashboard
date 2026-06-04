@@ -25,6 +25,14 @@ type ProxyNode struct {
 	RawLink  string `json:"raw_link,omitempty"` // original vmess:// link
 }
 
+// OutboundOption 出站选项，含类型和实时状态（供规则页下拉选择）
+type OutboundOption struct {
+	Tag   string `json:"tag"`             // 出站标签名
+	Type  string `json:"type"`            // direct / selector / urltest / vmess / vless / shadowsocks ...
+	Now   string `json:"now,omitempty"`   // 当前选中节点（selector/urltest 组）
+	Delay int    `json:"delay,omitempty"` // 当前节点延迟(ms)，-1 表示不可达
+}
+
 // ── Routing Rule ──
 
 // RuleCondition 表示规则中的一个匹配条件（多个条件以 AND 逻辑组合）
