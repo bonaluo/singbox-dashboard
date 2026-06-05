@@ -294,7 +294,29 @@ func SwitchProxy(tag string) error {
 		config.ClashAPI+"/proxies/proxy",
 		"-H", "Content-Type: application/json",
 		"-d", body)
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("切换节点失败: %w", err)
+	}
+
+	// 持久化 selector 的默认选择，避免重启后丢失
+	cfg, err := loadSingBoxConfig()
+	if err != nil {
+		return nil // 切换已成功，持久化失败不阻塞
+	}
+	outbounds, _ := cfg["outbounds"].([]interface{})
+	for _, ob := range outbounds {
+		m, ok := ob.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		t, _ := m["type"].(string)
+		name, _ := m["tag"].(string)
+		if t == "selector" && name == "proxy" {
+			m["default"] = tag
+			return WriteSingBoxConfig(cfg)
+		}
+	}
+	return nil
 }
 
 // ── 获取节点延迟 ──
