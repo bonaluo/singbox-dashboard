@@ -43,6 +43,7 @@ func Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/groups", handleListGroups)
 	mux.HandleFunc("POST /api/groups", handleCreateGroup)
 	mux.HandleFunc("DELETE /api/groups/{name}", handleDeleteGroup)
+	mux.HandleFunc("GET /api/groups/members", handleGroupMembers)
 
 	// ── 配置 ──
 	mux.HandleFunc("GET /api/config", handleGetConfig)
@@ -434,4 +435,12 @@ func handleDeleteGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sendOK(w, map[string]string{"deleted": name})
+}
+
+func handleGroupMembers(w http.ResponseWriter, r *http.Request) {
+	proxies, groups := services.GetGroupMembers()
+	sendOK(w, map[string]interface{}{
+		"proxies": proxies,
+		"groups":  groups,
+	})
 }

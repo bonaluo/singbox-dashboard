@@ -118,6 +118,15 @@ type GroupInfo struct {
 	Now   string   `json:"now,omitempty"`
 }
 
+// GroupMember 组可用的成员项（单个节点或已有组）
+type GroupMember struct {
+	Tag      string `json:"tag"`
+	Type     string `json:"type"`       // proxy / selector / urltest
+	Region   string `json:"region,omitempty"` // 仅 proxy 时有
+	IsGroup  bool   `json:"is_group"`   // true=已有组，false=单个节点
+	MemberCount int  `json:"member_count,omitempty"` // 组内节点数
+}
+
 // ── Status ──
 
 type StatusResponse struct {

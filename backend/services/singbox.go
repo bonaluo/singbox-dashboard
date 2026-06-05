@@ -128,10 +128,13 @@ func GetProxies() []models.ProxyNode {
 	for _, ob := range cfg["outbounds"].([]interface{}) {
 		m := ob.(map[string]interface{})
 		t, _ := m["type"].(string)
-		if t == "selector" || t == "direct" || t == "block" {
+		if t == "selector" || t == "direct" || t == "block" || t == "urltest" {
 			continue
 		}
 		tag, _ := m["tag"].(string)
+		if isMetaLine(tag) {
+			continue
+		}
 		server, _ := m["server"].(string)
 		port := 0
 		if p, ok := m["server_port"].(float64); ok {
@@ -148,6 +151,65 @@ func GetProxies() []models.ProxyNode {
 	return nodes
 }
 
+// ── 获取可选作组成员的节点和已有组 ──
+
+// GetGroupMembers 返回单个节点（按地区分组）和已有组
+func GetGroupMembers() ([]models.GroupMember, []models.GroupMember) {
+	cfg, err := loadSingBoxConfig()
+	if err != nil {
+		return nil, nil
+	}
+	var proxyMembers []models.GroupMember
+	var groupMembers []models.GroupMember
+
+	for _, ob := range cfg["outbounds"].([]interface{}) {
+		m := ob.(map[string]interface{})
+		t, _ := m["type"].(string)
+		tag, _ := m["tag"].(string)
+		if tag == "" {
+			continue
+		}
+
+		// 过滤无用行
+		if isMetaLine(tag) {
+			continue
+		}
+
+		if t == "selector" || t == "urltest" {
+			nodes, _ := m["outbounds"].([]interface{})
+			groupMembers = append(groupMembers, models.GroupMember{
+				Tag:         tag,
+				Type:        t,
+				IsGroup:     true,
+				MemberCount: len(nodes),
+			})
+			continue
+		}
+		if t == "direct" || t == "block" || t == "dns" {
+			continue
+		}
+
+		// 单个代理节点
+		proxyMembers = append(proxyMembers, models.GroupMember{
+			Tag:    tag,
+			Type:   t,
+			Region: detectRegion(tag),
+		})
+	}
+	return proxyMembers, groupMembers
+}
+
+// isMetaLine 判断是否是无用信息行（非真实节点）
+func isMetaLine(tag string) bool {
+	metaKeywords := []string{"剩余流量", "距离下次重置", "套餐到期", "过滤掉"}
+	for _, kw := range metaKeywords {
+		if strings.Contains(tag, kw) {
+			return true
+		}
+	}
+	return false
+}
+
 // ── 获取全部出站（含组和节点）──
 
 // GetAllOutbounds 从 sing-box 配置读取全部出站（不过滤类型），返回 tag+type
@@ -161,7 +223,7 @@ func GetAllOutbounds() []models.OutboundOption {
 		m := ob.(map[string]interface{})
 		tag, _ := m["tag"].(string)
 		t, _ := m["type"].(string)
-		if tag == "" {
+		if tag == "" || isMetaLine(tag) {
 			continue
 		}
 		outbounds = append(outbounds, models.OutboundOption{
