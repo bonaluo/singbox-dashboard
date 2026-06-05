@@ -252,6 +252,103 @@ func GetProxyDelay(tag string, timeout int) int {
 	return result.Delay
 }
 
+// ── 出站组管理 ──
+
+func CreateGroup(name string, nodes []string) error {
+	cfg, err := loadSingBoxConfig()
+	if err != nil {
+		return fmt.Errorf("加载配置失败: %w", err)
+	}
+
+	// 检查是否已存在同名出站
+	for _, ob := range cfg["outbounds"].([]interface{}) {
+		m := ob.(map[string]interface{})
+		if tag, _ := m["tag"].(string); tag == name {
+			return fmt.Errorf("出站组 '%s' 已存在", name)
+		}
+	}
+
+	// 创建 selector 出站
+	group := map[string]interface{}{
+		"tag":       name,
+		"type":      "selector",
+		"outbounds": nodes,
+	}
+
+	outbounds, _ := cfg["outbounds"].([]interface{})
+	cfg["outbounds"] = append(outbounds, group)
+
+	if err := WriteSingBoxConfig(cfg); err != nil {
+		return err
+	}
+	return RestartService()
+}
+
+func DeleteGroup(name string) error {
+	cfg, err := loadSingBoxConfig()
+	if err != nil {
+		return fmt.Errorf("加载配置失败: %w", err)
+	}
+
+	outbounds, _ := cfg["outbounds"].([]interface{})
+	var filtered []interface{}
+	found := false
+	for _, ob := range outbounds {
+		m := ob.(map[string]interface{})
+		t, _ := m["tag"].(string)
+		tp, _ := m["type"].(string)
+		if t == name && (tp == "selector" || tp == "urltest") {
+			found = true
+			continue
+		}
+		filtered = append(filtered, ob)
+	}
+	if !found {
+		return fmt.Errorf("出站组 '%s' 未找到", name)
+	}
+	cfg["outbounds"] = filtered
+
+	if err := WriteSingBoxConfig(cfg); err != nil {
+		return err
+	}
+	return RestartService()
+}
+
+func ListGroups() []models.GroupInfo {
+	cfg, err := loadSingBoxConfig()
+	if err != nil {
+		return nil
+	}
+	running := isRunning()
+	var groups []models.GroupInfo
+	for _, ob := range cfg["outbounds"].([]interface{}) {
+		m := ob.(map[string]interface{})
+		t, _ := m["type"].(string)
+		if t != "selector" && t != "urltest" {
+			continue
+		}
+		tag, _ := m["tag"].(string)
+		now := ""
+		if running {
+			now = GetGroupNow(tag)
+		}
+		nodes, _ := m["outbounds"].([]interface{})
+		var nodeTags []string
+		for _, n := range nodes {
+			if s, ok := n.(string); ok {
+				nodeTags = append(nodeTags, s)
+			}
+		}
+		groups = append(groups, models.GroupInfo{
+			Name:  tag,
+			Type:  t,
+			Nodes: nodeTags,
+			Now:   now,
+		})
+	}
+	return groups
+}
+
 // ── 连接列表 ──
 
 func GetConnections() []map[string]interface{} {

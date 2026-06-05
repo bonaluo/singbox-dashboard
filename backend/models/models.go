@@ -80,6 +80,20 @@ type RuleStore struct {
 	Rules []Rule `json:"rules"`
 }
 
+// ── Group (outbound selector group) ──
+
+type GroupRequest struct {
+	Name  string   `json:"name"`
+	Nodes []string `json:"nodes"`
+}
+
+type GroupInfo struct {
+	Name  string   `json:"name"`
+	Type  string   `json:"type"`
+	Nodes []string `json:"nodes"`
+	Now   string   `json:"now,omitempty"`
+}
+
 // ── Status ──
 
 type StatusResponse struct {

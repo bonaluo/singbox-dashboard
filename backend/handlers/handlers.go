@@ -38,6 +38,11 @@ func Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/rules/apply", handleApplyRules)
 	mux.HandleFunc("GET /api/rules/options", handleRuleOptions)
 
+	// ── 出站组 ──
+	mux.HandleFunc("GET /api/groups", handleListGroups)
+	mux.HandleFunc("POST /api/groups", handleCreateGroup)
+	mux.HandleFunc("DELETE /api/groups/{name}", handleDeleteGroup)
+
 	// ── 配置 ──
 	mux.HandleFunc("GET /api/config", handleGetConfig)
 
@@ -339,4 +344,44 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 		"connections": conns,
 		"count":       len(conns),
 	})
+}
+
+// ── 出站组 handlers ──
+
+func handleListGroups(w http.ResponseWriter, r *http.Request) {
+	groups := services.ListGroups()
+	sendOK(w, map[string]interface{}{
+		"groups": groups,
+		"count":  len(groups),
+	})
+}
+
+func handleCreateGroup(w http.ResponseWriter, r *http.Request) {
+	var req models.GroupRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendError(w, 400, "invalid JSON")
+		return
+	}
+	if req.Name == "" {
+		sendError(w, 400, "name is required")
+		return
+	}
+	if len(req.Nodes) == 0 {
+		sendError(w, 400, "至少选择一个节点")
+		return
+	}
+	if err := services.CreateGroup(req.Name, req.Nodes); err != nil {
+		sendError(w, 500, "创建组失败: "+err.Error())
+		return
+	}
+	sendOK(w, map[string]string{"created": req.Name})
+}
+
+func handleDeleteGroup(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if err := services.DeleteGroup(name); err != nil {
+		sendError(w, 500, err.Error())
+		return
+	}
+	sendOK(w, map[string]string{"deleted": name})
 }

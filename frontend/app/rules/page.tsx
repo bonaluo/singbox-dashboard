@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { api } from '@/components/Sidebar'
+import OutboundSelectorModal from '@/components/OutboundSelectorModal'
 
 // ── 类型 ──
 
@@ -88,131 +89,10 @@ const ACTIONS = [
   { value: 'sniff', label: 'sniff - 仅协议嗅探' },
 ]
 
-// ── 出站选择组件 ──
+// ── 出站选择组件（使用 OutboundSelectorModal 弹窗） ──
 
-function OutboundSelect({
-  value,
-  onChange,
-  options,
-  disabled,
-}: {
-  value: string
-  onChange: (v: string) => void
-  options: OutboundOption[]
-  disabled?: boolean
-}) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  const selected = options.find(o => o.tag === value)
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [])
-
-  const typeColor = (t: string) => {
-    const map: Record<string, string> = {
-      direct: 'bg-green-500/20 text-green-400',
-      selector: 'bg-blue-500/20 text-blue-400',
-      urltest: 'bg-purple-500/20 text-purple-400',
-      vmess: 'bg-orange-500/20 text-orange-400',
-      vless: 'bg-cyan-500/20 text-cyan-400',
-      shadowsocks: 'bg-teal-500/20 text-teal-400',
-      trojan: 'bg-pink-500/20 text-pink-400',
-    }
-    return map[t] || 'bg-gray-500/20 text-gray-400'
-  }
-
-  const delayColor = (d?: number) => {
-    if (!d || d <= 0) return 'text-gray-600'
-    if (d < 200) return 'text-green-400'
-    if (d < 500) return 'text-yellow-400'
-    return 'text-red-400'
-  }
-
-  const typeLabel = (t: string) => {
-    const short: Record<string, string> = {
-      urltest: 'URL',
-      selector: 'SEL',
-      direct: 'DIR',
-      vmess: 'VM',
-      vless: 'VL',
-      shadowsocks: 'SS',
-      trojan: 'TJ',
-    }
-    return short[t] || t.slice(0, 3).toUpperCase()
-  }
-
-  return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        onClick={() => !disabled && setOpen(!open)}
-        disabled={disabled}
-        className="w-full bg-[#0f1419] border border-[var(--border)] rounded-lg px-3 py-2 text-sm flex items-center gap-2 disabled:opacity-40 transition-colors hover:border-gray-600"
-      >
-        {selected ? (
-          <>
-            <span className={`text-[10px] px-1 py-0.5 rounded font-mono shrink-0 ${typeColor(selected.type)}`}>
-              {typeLabel(selected.type)}
-            </span>
-            <span className="flex-1 text-left truncate">{selected.tag}</span>
-            {selected.now && (
-              <span className="text-xs text-gray-500 truncate max-w-[100px]" title={selected.now}>
-                → {selected.now.length > 16 ? selected.now.slice(0, 14) + '…' : selected.now}
-              </span>
-            )}
-            {selected.delay !== undefined && selected.delay > 0 && (
-              <span className={`text-[11px] font-mono shrink-0 ${delayColor(selected.delay)}`}>
-                {selected.delay}ms
-              </span>
-            )}
-          </>
-        ) : (
-          <span className="text-gray-500">选择出站</span>
-        )}
-        <svg className="w-4 h-4 text-gray-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
-
-      {open && (
-        <div className="absolute z-50 mt-1 w-full bg-[#0f1419] border border-[var(--border)] rounded-lg shadow-xl max-h-64 overflow-y-auto">
-          {options.map(ob => (
-            <button
-              key={ob.tag}
-              type="button"
-              onClick={() => { onChange(ob.tag); setOpen(false) }}
-              className={`w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-[var(--surface-hover)] transition-colors text-left ${
-                ob.tag === value ? 'bg-[var(--accent)]/10 border-l-2 border-[var(--accent)]' : ''
-              }`}
-            >
-              <span className={`text-[10px] px-1 py-0.5 rounded font-mono shrink-0 ${typeColor(ob.type)}`}>
-                {typeLabel(ob.type)}
-              </span>
-              <span className="flex-1 truncate">{ob.tag}</span>
-              {ob.now && (
-                <span className="text-xs text-gray-500 truncate max-w-[100px]" title={ob.now}>
-                  → {ob.now.length > 16 ? ob.now.slice(0, 14) + '…' : ob.now}
-                </span>
-              )}
-              {ob.delay !== undefined && ob.delay > 0 && (
-                <span className={`text-[11px] font-mono shrink-0 ${delayColor(ob.delay)}`}>
-                  {ob.delay}ms
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
+// 已迁移到 components/OutboundSelectorModal.tsx 使用模态弹窗选择
+// 老的 OutboundSelect 下拉选择器已被移除
 
 // ── 主页面组件 ──
 
@@ -419,7 +299,7 @@ export default function RulesPage() {
               <label className="text-xs text-gray-500 mb-1 block">
                 出站 {formAction !== 'route' && '(route 时有效)'}
               </label>
-              <OutboundSelect
+              <OutboundSelectorModal
                 value={formOutbound}
                 onChange={setFormOutbound}
                 options={outbounds}
