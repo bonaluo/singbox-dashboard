@@ -268,8 +268,8 @@ func resolveSource(sourceID, sourceURL string) (int, []models.ProxyNode, string,
 	return 0, nil, "", fmt.Errorf("空源")
 }
 
-// resolveSourceWithLabel 解析单个子源并返回带名称的 SubscriptionSource
-func resolveSourceWithLabel(sourceID, sourceURL string) models.SubscriptionSource {
+// resolveSourceWithLabel 解析单个子源并返回带名称的 SubscriptionSource 和节点数据
+func resolveSourceWithLabel(sourceID, sourceURL string) (models.SubscriptionSource, []models.ProxyNode) {
 	result := models.SubscriptionSource{
 		ID:  sourceID,
 		URL: sourceURL,
@@ -286,33 +286,33 @@ func resolveSourceWithLabel(sourceID, sourceURL string) models.SubscriptionSourc
 				}
 			}
 		}
-		count, _, _, err := resolveSource(sourceID, "")
+		count, nodes, _, err := resolveSource(sourceID, "")
 		result.NodeCount = count
 		if err != nil {
 			result.Status = "error"
 			result.Error = err.Error()
-		} else {
-			result.Status = "ok"
+			return result, nil
 		}
-		return result
+		result.Status = "ok"
+		return result, nodes
 	}
 
 	if sourceURL != "" {
 		result.Name = sourceURL
-		count, _, _, err := resolveSource("", sourceURL)
+		count, nodes, _, err := resolveSource("", sourceURL)
 		result.NodeCount = count
 		if err != nil {
 			result.Status = "error"
 			result.Error = err.Error()
-		} else {
-			result.Status = "ok"
+			return result, nil
 		}
-		return result
+		result.Status = "ok"
+		return result, nodes
 	}
 
 	result.Status = "error"
 	result.Error = "空源"
-	return result
+	return result, nil
 }
 
 // LoadMergedSubscriptions 读取指定子源列表并合并去重
@@ -322,19 +322,13 @@ func LoadMergedSubscriptions(sources []models.SubscriptionSource) ([]models.Prox
 	var results []models.SubscriptionSource
 
 	for _, src := range sources {
-		srcResult := resolveSourceWithLabel(src.ID, src.URL)
+		srcResult, nodes := resolveSourceWithLabel(src.ID, src.URL)
 		results = append(results, srcResult)
 
 		if srcResult.Status != "ok" {
 			continue
 		}
 
-		// 解析成功：合并节点
-		count, nodes, _, _ := resolveSource(src.ID, src.URL)
-		if len(nodes) == 0 {
-			count, nodes, _, _ = resolveSource(src.ID, src.URL)
-		}
-		_ = count
 		for _, n := range nodes {
 			allNodes[n.Tag] = n
 		}
