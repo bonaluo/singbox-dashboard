@@ -454,8 +454,8 @@ func handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 	if groupType == "" {
 		groupType = "selector"
 	}
-	if groupType != "selector" && groupType != "urltest" {
-		sendError(w, 400, "type must be selector or urltest")
+	if groupType != "selector" && groupType != "urltest" && groupType != "loadbalance" {
+		sendError(w, 400, "type must be selector / urltest / loadbalance")
 		return
 	}
 	if err := services.CreateGroup(name, groupType, nodes); err != nil {

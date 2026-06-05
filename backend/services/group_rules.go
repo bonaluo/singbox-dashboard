@@ -102,7 +102,7 @@ func ApplyGroupRules() error {
 			continue
 		}
 		t, _ := m["type"].(string)
-		if t == "selector" || t == "urltest" {
+		if t == "selector" || t == "urltest" || t == "loadbalance" {
 			if tag, _ := m["tag"].(string); tag != "" {
 				existingGroupNames[tag] = true
 			}

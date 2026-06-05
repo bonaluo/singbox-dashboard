@@ -27,6 +27,7 @@ export default function OutboundSelectorModal({
       direct: 'bg-green-500/20 text-green-400',
       selector: 'bg-blue-500/20 text-blue-400',
       urltest: 'bg-purple-500/20 text-purple-400',
+      loadbalance: 'bg-green-500/20 text-green-400',
       vmess: 'bg-orange-500/20 text-orange-400',
       vless: 'bg-cyan-500/20 text-cyan-400',
       shadowsocks: 'bg-teal-500/20 text-teal-400',

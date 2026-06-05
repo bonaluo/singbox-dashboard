@@ -139,6 +139,7 @@ export default function GroupManager() {
               >
                 <option value="selector">Selector（手动选择）</option>
                 <option value="urltest">URLTest（自动选低延迟）</option>
+                <option value="loadbalance">LoadBalance（负载均衡）</option>
               </select>
             </div>
             <div className="flex gap-2 items-center">
@@ -182,9 +183,9 @@ export default function GroupManager() {
                       {checkedGroups.has(g.tag) ? '✓' : ''}
                     </span>
                     <span className={`text-[10px] px-1 py-0.5 rounded font-mono ${
-                      g.type === 'urltest' ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400'
+                      g.type === 'urltest' ? 'bg-purple-500/20 text-purple-400' : g.type === 'loadbalance' ? 'bg-green-500/20 text-green-400' : 'bg-blue-500/20 text-blue-400'
                     }`}>
-                      {g.type === 'urltest' ? 'URL' : 'SEL'}
+                      {g.type === 'urltest' ? 'URL' : g.type === 'loadbalance' ? 'LB' : 'SEL'}
                     </span>
                     <span className="truncate">{g.tag}</span>
                     {g.member_count !== undefined && (
@@ -259,9 +260,9 @@ export default function GroupManager() {
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
                 <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${
-                  g.type === 'urltest' ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400'
+                  g.type === 'urltest' ? 'bg-purple-500/20 text-purple-400' : g.type === 'loadbalance' ? 'bg-green-500/20 text-green-400' : 'bg-blue-500/20 text-blue-400'
                 }`}>
-                  {g.type === 'urltest' ? 'URL' : 'SEL'}
+                  {g.type === 'urltest' ? 'URL' : g.type === 'loadbalance' ? 'LB' : 'SEL'}
                 </span>
                 <span className="font-medium text-sm">{g.name}</span>
                 {g.now && (

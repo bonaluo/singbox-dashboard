@@ -128,7 +128,7 @@ func GetProxies() []models.ProxyNode {
 	for _, ob := range cfg["outbounds"].([]interface{}) {
 		m := ob.(map[string]interface{})
 		t, _ := m["type"].(string)
-		if t == "selector" || t == "direct" || t == "block" || t == "urltest" {
+		if t == "selector" || t == "direct" || t == "block" || t == "urltest" || t == "loadbalance" {
 			continue
 		}
 		tag, _ := m["tag"].(string)
@@ -175,7 +175,7 @@ func GetGroupMembers() ([]models.GroupMember, []models.GroupMember) {
 			continue
 		}
 
-		if t == "selector" || t == "urltest" {
+		if t == "selector" || t == "urltest" || t == "loadbalance" {
 			nodes, _ := m["outbounds"].([]interface{})
 			groupMembers = append(groupMembers, models.GroupMember{
 				Tag:         tag,
@@ -364,7 +364,7 @@ func DeleteGroup(name string) error {
 		m := ob.(map[string]interface{})
 		t, _ := m["tag"].(string)
 		tp, _ := m["type"].(string)
-		if t == name && (tp == "selector" || tp == "urltest") {
+		if t == name && (tp == "selector" || tp == "urltest" || tp == "loadbalance") {
 			found = true
 			continue
 		}
@@ -391,7 +391,7 @@ func ListGroups() []models.GroupInfo {
 	for _, ob := range cfg["outbounds"].([]interface{}) {
 		m := ob.(map[string]interface{})
 		t, _ := m["type"].(string)
-		if t != "selector" && t != "urltest" {
+		if t != "selector" && t != "urltest" && t != "loadbalance" {
 			continue
 		}
 		tag, _ := m["tag"].(string)

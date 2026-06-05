@@ -142,6 +142,7 @@ export default function GroupRulesPage() {
                 className="w-full bg-[#0f1419] border border-[var(--border)] rounded-lg px-3 py-2 text-sm">
                 <option value="urltest">URLTest（自动选低延迟）</option>
                 <option value="selector">Selector（手动选择）</option>
+                <option value="loadbalance">LoadBalance（负载均衡）</option>
               </select>
             </div>
             <div>
@@ -208,9 +209,9 @@ export default function GroupRulesPage() {
             <div className="flex items-center gap-2">
               <span className="text-xs text-gray-500 w-6">#{rule.sort_order}</span>
               <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${
-                rule.type === 'urltest' ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400'
+                rule.type === 'urltest' ? 'bg-purple-500/20 text-purple-400' : rule.type === 'loadbalance' ? 'bg-green-500/20 text-green-400' : 'bg-blue-500/20 text-blue-400'
               }`}>
-                {rule.type === 'urltest' ? 'URL' : 'SEL'}
+                {rule.type === 'urltest' ? 'URL' : rule.type === 'loadbalance' ? 'LB' : 'SEL'}
               </span>
               <span className="font-medium text-sm">{rule.name}</span>
             </div>

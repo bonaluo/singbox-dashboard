@@ -338,7 +338,7 @@ func GetEnrichedOutbounds() []models.OutboundOption {
 	var result []models.OutboundOption
 	for _, ob := range all {
 		enriched := ob
-		if ob.Type == "selector" || ob.Type == "urltest" {
+		if ob.Type == "selector" || ob.Type == "urltest" || ob.Type == "loadbalance" {
 			now := GetGroupNow(ob.Tag)
 			enriched.Now = now
 
