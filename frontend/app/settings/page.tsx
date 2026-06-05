@@ -50,6 +50,62 @@ export default function SettingsPage() {
     '30d': '每月',
   }
 
+  // ── Config Viewer ──
+  const [configOpen, setConfigOpen] = useState(false)
+  const [config, setConfig] = useState<any>(null)
+  const [configCollapsed, setConfigCollapsed] = useState<Set<string>>(new Set())
+
+  const loadConfig = async () => {
+    const r = await api('/api/config')
+    if (r.ok) setConfig(r.data)
+  }
+
+  const ConfigTree = ({ data, path = '' }: { data: any; path?: string }) => {
+    if (data === null || data === undefined) return <span className="text-gray-500">null</span>
+    if (typeof data === 'string') return <span className="text-green-400/80">"{data}"</span>
+    if (typeof data === 'number' || typeof data === 'boolean') return <span className="text-yellow-400">{String(data)}</span>
+    if (Array.isArray(data)) {
+      if (data.length === 0) return <span className="text-gray-500">[]</span>
+      const key = path || 'root'
+      const collapsed = configCollapsed.has(key)
+      return (
+        <div className="ml-3">
+          <button onClick={() => setConfigCollapsed(prev => { const n = new Set(prev); collapsed ? n.delete(key) : n.add(key); return n })}
+            className="text-xs text-gray-500 hover:text-gray-300 mb-0.5">
+            {collapsed ? '▶' : '▼'} [{data.length}]
+          </button>
+          {!collapsed && data.map((item: any, i: number) => (
+            <div key={i} className="ml-2 border-l border-[var(--border)]/30 pl-2">
+              <span className="text-xs text-gray-600 mr-1">{i}:</span>
+              <ConfigTree data={item} path={`${path}[${i}]`} />
+            </div>
+          ))}
+        </div>
+      )
+    }
+    if (typeof data === 'object') {
+      const entries = Object.entries(data)
+      if (entries.length === 0) return <span className="text-gray-500">{'{}'}</span>
+      const key = path || 'root'
+      const collapsed = configCollapsed.has(key)
+      return (
+        <div className="ml-3">
+          <button onClick={() => setConfigCollapsed(prev => { const n = new Set(prev); collapsed ? n.delete(key) : n.add(key); return n })}
+            className="text-xs text-gray-500 hover:text-gray-300 mb-0.5">
+            {collapsed ? '▶' : '▼'} {'{...}'}
+          </button>
+          {!collapsed && entries.map(([k, v]) => (
+            <div key={k} className="ml-2">
+              <span className="text-[var(--accent)] text-xs">{k}: </span>
+              <ConfigTree data={v} path={`${path}.${k}`} />
+            </div>
+          ))}
+        </div>
+      )
+    }
+    return <span>{JSON.stringify(data)}</span>
+  }
+
   return (
     <div className="max-w-xl">
       <h2 className="text-xl font-bold mb-4">⚙️ 设置</h2>
@@ -97,6 +153,25 @@ export default function SettingsPage() {
           <p className={`text-xs mt-2 ${geoMsg.includes('失败') ? 'text-red-400' : 'text-green-400'}`}>
             {geoMsg}
           </p>
+        )}
+      </div>
+
+      {/* 查看配置 */}
+      <div className="bg-[var(--surface)] rounded-xl p-4 mt-4 border border-[var(--border)]">
+        <button
+          onClick={() => { setConfigOpen(!configOpen); if (!config && !configOpen) loadConfig() }}
+          className="flex items-center justify-between w-full"
+        >
+          <h3 className="font-semibold">📄 sing-box 配置</h3>
+          <span className="text-gray-500 text-sm">{configOpen ? '收起' : '展开'}</span>
+        </button>
+        {configOpen && config && (
+          <div className="mt-3 bg-[#0f1419] rounded-lg p-3 text-xs font-mono max-h-[500px] overflow-auto">
+            <ConfigTree data={config} />
+          </div>
+        )}
+        {configOpen && !config && (
+          <div className="mt-3 text-xs text-gray-500">加载中...</div>
         )}
       </div>
     </div>
