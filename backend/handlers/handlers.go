@@ -47,6 +47,11 @@ func Register(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/groups/{name}", handleDeleteGroup)
 	mux.HandleFunc("GET /api/groups/members", handleGroupMembers)
 
+	// ── 分组规则 ──
+	mux.HandleFunc("GET /api/group-rules", handleListGroupRules)
+	mux.HandleFunc("POST /api/group-rules", handleSaveGroupRules)
+	mux.HandleFunc("POST /api/group-rules/apply", handleApplyGroupRules)
+
 	// ── 配置 ──
 	mux.HandleFunc("GET /api/config", handleGetConfig)
 
@@ -514,4 +519,50 @@ func handleSetGeoUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sendOK(w, cfg)
+}
+
+// ── 分组规则 ──
+
+func handleListGroupRules(w http.ResponseWriter, r *http.Request) {
+	rules, err := services.LoadGroupRules()
+	if err != nil {
+		sendError(w, 500, err.Error())
+		return
+	}
+	if rules == nil {
+		rules = []models.GroupRule{}
+	}
+	sendOK(w, rules)
+}
+
+func handleSaveGroupRules(w http.ResponseWriter, r *http.Request) {
+	body := readBody(r)
+	rulesRaw, _ := body["rules"].([]interface{})
+	if rulesRaw == nil {
+		sendError(w, 400, "rules required")
+		return
+	}
+	data, err := json.Marshal(rulesRaw)
+	if err != nil {
+		sendError(w, 400, "invalid rules")
+		return
+	}
+	var rules []models.GroupRule
+	if err := json.Unmarshal(data, &rules); err != nil {
+		sendError(w, 400, "invalid rules format")
+		return
+	}
+	if err := services.SaveGroupRules(rules); err != nil {
+		sendError(w, 500, err.Error())
+		return
+	}
+	sendOK(w, rules)
+}
+
+func handleApplyGroupRules(w http.ResponseWriter, r *http.Request) {
+	if err := services.ApplyGroupRules(); err != nil {
+		sendError(w, 500, err.Error())
+		return
+	}
+	sendOK(w, map[string]string{"msg": "分组规则已应用"})
 }

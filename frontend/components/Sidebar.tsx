@@ -18,6 +18,7 @@ const navItems = [
   { href: '/subscriptions', label: '订阅', icon: '📡' },
   { href: '/rules', label: '规则', icon: '📋' },
   { href: '/groups', label: '出站组', icon: '📦' },
+  { href: '/group-rules', label: '分组规则', icon: '📋' },
   { href: '/config', label: '配置', icon: '📄' },
   { href: '/connections', label: '连接', icon: '🔌' },
   { href: '/logs', label: '日志', icon: '📜' },

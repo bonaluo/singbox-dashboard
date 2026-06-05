@@ -119,6 +119,20 @@ type GroupInfo struct {
 	Now   string   `json:"now,omitempty"`
 }
 
+// GroupRule 自动分组规则
+type GroupRule struct {
+	Name      string   `json:"name"`                 // 出站组名称
+	Type      string   `json:"type"`                 // "selector" / "urltest"
+	Pattern   string   `json:"pattern,omitempty"`    // 正则匹配节点 tag，空=使用 Proxies
+	Proxies   []string `json:"proxies,omitempty"`    // 显式出站列表（替代 pattern）
+	Defaults  []string `json:"defaults,omitempty"`   // 默认追加的出站（如 ["DIRECT"]）
+	SortOrder int      `json:"sort_order"`            // 排序
+}
+
+type GroupRuleStore struct {
+	Rules []GroupRule `json:"rules"`
+}
+
 // GroupMember 组可用的成员项（单个节点或已有组）
 type GroupMember struct {
 	Tag      string `json:"tag"`

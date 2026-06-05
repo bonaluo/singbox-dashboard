@@ -619,6 +619,8 @@ func ApplySubscription(id string) error {
 	if err := RestartService(); err != nil {
 		return err
 	}
+	// 应用分组规则重建出站组
+	ApplyGroupRules()
 	// 持久化已应用的订阅 ID（重启后前端可恢复标识）
 	return SaveAppliedSubscriptionID(id)
 }
