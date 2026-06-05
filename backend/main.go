@@ -25,6 +25,9 @@ func main() {
 	// 启动 SSE Hub
 	services.InitSSE()
 
+	// 启动 Geo 规则集自动更新循环
+	services.StartGeoUpdateLoop()
+
 	// 注册所有路由
 	mux := http.NewServeMux()
 	handlers.Register(mux)

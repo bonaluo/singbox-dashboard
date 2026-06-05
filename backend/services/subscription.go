@@ -423,6 +423,24 @@ func UpdateAggregatedSubscription(subID string) ([]models.ProxyNode, []models.Su
 	return nodes, results, nil
 }
 
+// ── 已应用订阅 ID 持久化 ──
+
+func appliedSubIDPath() string {
+	return filepath.Join(config.DataDir, "applied_sub_id")
+}
+
+func SaveAppliedSubscriptionID(id string) error {
+	return os.WriteFile(appliedSubIDPath(), []byte(id+"\n"), 0644)
+}
+
+func LoadAppliedSubscriptionID() string {
+	data, err := os.ReadFile(appliedSubIDPath())
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
 // ── 应用订阅到 sing-box（切换订阅） ──
 
 func ApplySubscription(id string) error {
@@ -572,6 +590,19 @@ func ApplySubscription(id string) error {
 		})
 	}
 
+	// 全节点 urltest 组，用于 rule_set 下载（download_detour），避免 selector 无选中节点的问题
+	var autoTags []string
+	for _, t := range tags {
+		if t != "direct" {
+			autoTags = append(autoTags, t)
+		}
+	}
+	newOutbounds = append(newOutbounds, map[string]interface{}{
+		"type":      "urltest",
+		"tag":       "自动选择",
+		"outbounds": autoTags,
+	})
+
 	cfg["outbounds"] = newOutbounds
 
 	// 清理可能残留的无效 default_domain_resolver
@@ -585,7 +616,11 @@ func ApplySubscription(id string) error {
 		return err
 	}
 	// 写完后启动/重启 sing-box
-	return RestartService()
+	if err := RestartService(); err != nil {
+		return err
+	}
+	// 持久化已应用的订阅 ID（重启后前端可恢复标识）
+	return SaveAppliedSubscriptionID(id)
 }
 
 // ── 解析 vmess:// / ss:// 等链接 ──

@@ -8,6 +8,7 @@ import (
 	"singbox-dashboard/models"
 	"singbox-dashboard/services"
 	"strings"
+	"time"
 )
 
 // ═══════════════════════════════════════════════════════════
@@ -24,6 +25,7 @@ func Register(mux *http.ServeMux) {
 
 	// ── 订阅 ──
 	mux.HandleFunc("GET /api/subscriptions", handleListSubscriptions)
+	mux.HandleFunc("GET /api/subscriptions/applied", handleGetAppliedSubscription)
 	mux.HandleFunc("POST /api/subscriptions", handleAddSubscription)
 	mux.HandleFunc("DELETE /api/subscriptions/{id}", handleDeleteSubscription)
 	mux.HandleFunc("POST /api/subscriptions/{id}/fetch", handleFetchSubscription)
@@ -47,6 +49,10 @@ func Register(mux *http.ServeMux) {
 
 	// ── 配置 ──
 	mux.HandleFunc("GET /api/config", handleGetConfig)
+
+	// ── 设置 ──
+	mux.HandleFunc("GET /api/settings/geo-update", handleGetGeoUpdateConfig)
+	mux.HandleFunc("POST /api/settings/geo-update", handleSetGeoUpdateConfig)
 
 	// ── SSE 事件推送 ──
 	mux.HandleFunc("GET /api/events", handleSSE)
@@ -126,7 +132,16 @@ func handleListSubscriptions(w http.ResponseWriter, r *http.Request) {
 		sendError(w, 500, err.Error())
 		return
 	}
-	sendOK(w, store)
+	appliedID := services.LoadAppliedSubscriptionID()
+	sendOK(w, map[string]interface{}{
+		"subscriptions": store.Subscriptions,
+		"applied_id":    appliedID,
+	})
+}
+
+func handleGetAppliedSubscription(w http.ResponseWriter, r *http.Request) {
+	appliedID := services.LoadAppliedSubscriptionID()
+	sendOK(w, map[string]string{"applied_id": appliedID})
 }
 
 func handleAddSubscription(w http.ResponseWriter, r *http.Request) {
@@ -443,4 +458,43 @@ func handleGroupMembers(w http.ResponseWriter, r *http.Request) {
 		"proxies": proxies,
 		"groups":  groups,
 	})
+}
+
+// ── Geo 规则集自动更新设置 ──
+
+func handleGetGeoUpdateConfig(w http.ResponseWriter, r *http.Request) {
+	cfg := services.LoadGeoUpdateConfig()
+	sendOK(w, cfg)
+}
+
+func handleSetGeoUpdateConfig(w http.ResponseWriter, r *http.Request) {
+	body := readBody(r)
+	interval, _ := body["interval"].(string)
+	if interval == "" {
+		sendError(w, 400, "interval required")
+		return
+	}
+	valid := map[string]bool{"off": true, "1d": true, "7d": true, "30d": true}
+	if !valid[interval] {
+		sendError(w, 400, "interval must be off/1d/7d/30d")
+		return
+	}
+	cfg := services.LoadGeoUpdateConfig()
+	cfg.Interval = interval
+	if interval != "off" {
+		cfg.LastUpdated = time.Now().Format(time.RFC3339)
+		// 立即执行一次更新
+		go func() {
+			if err := services.DownloadGeoRuleSets(); err == nil {
+				cfg := services.LoadGeoUpdateConfig()
+				cfg.LastUpdated = time.Now().Format(time.RFC3339)
+				services.SaveGeoUpdateConfig(cfg)
+			}
+		}()
+	}
+	if err := services.SaveGeoUpdateConfig(cfg); err != nil {
+		sendError(w, 500, err.Error())
+		return
+	}
+	sendOK(w, cfg)
 }

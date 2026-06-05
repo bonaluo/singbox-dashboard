@@ -21,7 +21,10 @@ export default function SubscriptionsPage() {
 
   const loadSubs = useCallback(async () => {
     const r = await api('/api/subscriptions')
-    if (r.ok) setSubs(r.data.subscriptions || [])
+    if (r.ok) {
+      setSubs(r.data.subscriptions || [])
+      if (r.data.applied_id) setActiveSub(r.data.applied_id)
+    }
   }, [])
 
   useEffect(() => { loadSubs() }, [loadSubs])
