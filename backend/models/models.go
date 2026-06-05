@@ -3,11 +3,13 @@ package models
 // ── Subscription ──
 
 type Subscription struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	URL         string `json:"url"`
-	LastUpdated string `json:"last_updated,omitempty"`
-	NodeCount   int    `json:"node_count,omitempty"`
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	URL         string   `json:"url"`
+	LastUpdated string   `json:"last_updated,omitempty"`
+	NodeCount   int      `json:"node_count,omitempty"`
+	Aggregated  bool     `json:"aggregated,omitempty"`   // 是否是聚合订阅
+	Sources     []string `json:"sources,omitempty"`      // 子订阅 ID 列表
 }
 
 type SubscriptionStore struct {
@@ -106,6 +108,12 @@ type StatusResponse struct {
 }
 
 // ── API responses ──
+
+type MergeRequest struct {
+	Name     string   `json:"name"`
+	Sources  []string `json:"sources"`
+	ExtraURL string   `json:"extra_url,omitempty"`
+}
 
 type APIResponse struct {
 	OK     bool        `json:"ok"`

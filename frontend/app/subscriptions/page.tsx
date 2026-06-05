@@ -13,6 +13,12 @@ export default function SubscriptionsPage() {
   const [cachedData, setCachedData] = useState<Record<string, any>>({})
   const [showRaw, setShowRaw] = useState(false)
 
+  // 聚合相关
+  const [showMerge, setShowMerge] = useState(false)
+  const [mergeName, setMergeName] = useState('')
+  const [mergeSources, setMergeSources] = useState<Set<string>>(new Set())
+  const [mergeExtraUrl, setMergeExtraUrl] = useState('')
+
   const loadSubs = useCallback(async () => {
     const r = await api('/api/subscriptions')
     if (r.ok) setSubs(r.data.subscriptions || [])
@@ -23,7 +29,6 @@ export default function SubscriptionsPage() {
   const addSub = async () => {
     if (!name || !url) return
     setLoading(true)
-    // 一次请求：拉取→验证→保存→返回订阅+解析结果
     const r = await api('/api/subscriptions', {
       method: 'POST',
       body: JSON.stringify({ name, url }),
@@ -75,6 +80,43 @@ export default function SubscriptionsPage() {
     setExpandedId(id)
   }
 
+  const toggleSource = (id: string) => {
+    setMergeSources(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const createMerge = async () => {
+    if (!mergeName) return
+    if (mergeSources.size === 0 && !mergeExtraUrl) return
+    setLoading(true)
+    const r = await api('/api/subscriptions/merge', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: mergeName,
+        sources: Array.from(mergeSources),
+        extra_url: mergeExtraUrl || undefined,
+      }),
+    })
+    if (r.ok) {
+      const sub = r.data.subscription
+      const result = r.data.result
+      setMergeName('')
+      setMergeSources(new Set())
+      setMergeExtraUrl('')
+      setShowMerge(false)
+      setCachedData(prev => ({ ...prev, [sub.id]: result }))
+      setExpandedId(sub.id)
+      await loadSubs()
+    } else {
+      alert(r.error || '聚合失败')
+    }
+    setLoading(false)
+  }
+
   return (
     <div className="max-w-4xl">
       <h2 className="text-xl font-bold mb-4">📡 订阅管理</h2>
@@ -89,21 +131,91 @@ export default function SubscriptionsPage() {
             placeholder="Clash 订阅地址"
             className="flex-[2] bg-[#0f1419] border border-[var(--border)] rounded-lg px-3 py-2 text-sm" />
         </div>
-        <button onClick={addSub} disabled={loading}
-          className="bg-[var(--accent)] text-white px-4 py-2 rounded-lg text-sm hover:opacity-90 disabled:opacity-50">
-          {loading ? '验证中...' : '添加订阅'}
-        </button>
+        <div className="flex gap-2">
+          <button onClick={addSub} disabled={loading}
+            className="bg-[var(--accent)] text-white px-4 py-2 rounded-lg text-sm hover:opacity-90 disabled:opacity-50">
+            {loading ? '验证中...' : '添加订阅'}
+          </button>
+          <button onClick={() => setShowMerge(!showMerge)}
+            className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm hover:opacity-90">
+            {showMerge ? '取消聚合' : '📎 创建聚合订阅'}
+          </button>
+        </div>
       </div>
+
+      {/* 聚合表单 */}
+      {showMerge && (
+        <div className="bg-[var(--surface)] rounded-xl p-4 mb-6 border border-purple-500/30">
+          <h3 className="font-semibold mb-3 text-purple-400">📎 创建聚合订阅</h3>
+
+          <div className="mb-3">
+            <label className="text-xs text-gray-500 mb-1 block">聚合名称</label>
+            <input value={mergeName} onChange={e => setMergeName(e.target.value)}
+              placeholder="例如: 全部节点聚合"
+              className="w-full bg-[#0f1419] border border-[var(--border)] rounded-lg px-3 py-2 text-sm" />
+          </div>
+
+          {subs.length > 0 && (
+            <div className="mb-3">
+              <label className="text-xs text-gray-500 mb-1 block">
+                选择已有订阅（已选 {mergeSources.size} 个）
+              </label>
+              <div className="max-h-40 overflow-y-auto space-y-1 border border-[var(--border)] rounded-lg p-2">
+                {subs.map(s => (
+                  <button
+                    key={s.id}
+                    onClick={() => toggleSource(s.id)}
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm text-left transition-colors ${
+                      mergeSources.has(s.id)
+                        ? 'bg-purple-500/10 border-l-2 border-purple-500'
+                        : 'hover:bg-[var(--surface-hover)]'
+                    }`}
+                  >
+                    <span className={`w-4 h-4 rounded border flex items-center justify-center text-[10px] shrink-0 ${
+                      mergeSources.has(s.id)
+                        ? 'bg-purple-500 border-purple-500 text-white'
+                        : 'border-gray-500'
+                    }`}>
+                      {mergeSources.has(s.id) ? '✓' : ''}
+                    </span>
+                    <span className="truncate">{s.name}</span>
+                    {s.node_count > 0 && (
+                      <span className="text-xs text-gray-500 shrink-0">({s.node_count})</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="mb-3">
+            <label className="text-xs text-gray-500 mb-1 block">额外订阅链接（可选）</label>
+            <input value={mergeExtraUrl} onChange={e => setMergeExtraUrl(e.target.value)}
+              placeholder="https://..."
+              className="w-full bg-[#0f1419] border border-[var(--border)] rounded-lg px-3 py-2 text-sm" />
+          </div>
+
+          <button onClick={createMerge} disabled={loading || !mergeName || (mergeSources.size === 0 && !mergeExtraUrl)}
+            className="bg-purple-600 text-white px-6 py-2 rounded-lg text-sm hover:opacity-90 disabled:opacity-50">
+            {loading ? '合并中...' : `创建聚合 (${mergeSources.size} 订阅${mergeExtraUrl ? ' + 额外链接' : ''})`}
+          </button>
+        </div>
+      )}
 
       {subs.map(sub => (
         <div key={sub.id} className="bg-[var(--surface)] rounded-xl p-4 mb-3 border border-[var(--border)]">
           <div className="flex items-center justify-between mb-2">
-            <div>
+            <div className="flex items-center gap-2">
+              {sub.aggregated && (
+                <span className="text-[10px] px-1 py-0.5 rounded bg-purple-500/20 text-purple-400 font-mono">
+                  聚合
+                </span>
+              )}
               <span className="font-semibold">{sub.name}
                 {activeSub === sub.id && <span className="ml-2 text-xs text-green-400">● 当前</span>}
               </span>
               {sub.node_count > 0 && (
-                <span className="ml-2 text-xs text-gray-400">({sub.node_count} 节点)</span>
+                <span className="text-xs text-gray-400">({sub.node_count} 节点)</span>
               )}
             </div>
             <div className="flex gap-2">
@@ -120,6 +232,20 @@ export default function SubscriptionsPage() {
             </div>
           </div>
           <div className="text-xs text-gray-500 truncate">{sub.url}</div>
+
+          {/* 聚合订阅的子源显示 */}
+          {sub.aggregated && sub.sources && sub.sources.length > 0 && (
+            <div className="mt-1 flex flex-wrap gap-1">
+              {sub.sources.map((sid: string) => {
+                const src = subs.find((s: any) => s.id === sid)
+                return (
+                  <span key={sid} className="text-[10px] px-1 py-0.5 rounded bg-gray-500/20 text-gray-400">
+                    {src?.name || sid.slice(0, 12)}
+                  </span>
+                )
+              })}
+            </div>
+          )}
 
           {expandedId === sub.id && cachedData[sub.id] && (
             <div className="mt-3 border-t border-[var(--border)] pt-3">

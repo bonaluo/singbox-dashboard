@@ -29,6 +29,7 @@ func Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/subscriptions/{id}/fetch", handleFetchSubscription)
 	mux.HandleFunc("POST /api/subscriptions/{id}/apply", handleApplySubscription)
 	mux.HandleFunc("GET /api/subscriptions/{id}/data", handleGetSubscriptionData)
+	mux.HandleFunc("POST /api/subscriptions/merge", handleMergeSubscriptions)
 
 	// ── 规则 ──
 	mux.HandleFunc("GET /api/rules", handleListRules)
@@ -198,6 +199,32 @@ func handleGetSubscriptionData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sendOK(w, data)
+}
+
+func handleMergeSubscriptions(w http.ResponseWriter, r *http.Request) {
+	var req models.MergeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendError(w, 400, "invalid JSON")
+		return
+	}
+	if req.Name == "" {
+		sendError(w, 400, "name is required")
+		return
+	}
+	if len(req.Sources) == 0 && req.ExtraURL == "" {
+		sendError(w, 400, "至少选择一个订阅或填写订阅链接")
+		return
+	}
+
+	sub, result, err := services.CreateMergedSubscription(req.Name, req.Sources, req.ExtraURL)
+	if err != nil {
+		sendError(w, 500, "创建聚合订阅失败: "+err.Error())
+		return
+	}
+	sendOK(w, map[string]interface{}{
+		"subscription": sub,
+		"result":       result,
+	})
 }
 
 func handleListRules(w http.ResponseWriter, r *http.Request) {

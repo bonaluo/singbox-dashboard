@@ -238,17 +238,178 @@ func FetchAndParseSubscription(id string) (*FetchResult, error) {
 	return result, nil
 }
 
+// ── 拉取+解析外部 URL ──
+
+// FetchAndParseURL 从 URL 拉取并解析节点
+func FetchAndParseURL(subURL string) (*FetchResult, error) {
+	raw, err := FetchRaw(subURL)
+	if err != nil {
+		return nil, err
+	}
+	result := ParseRaw(raw)
+	if result.NodeCount == 0 {
+		return nil, fmt.Errorf("未解析到有效节点")
+	}
+	return result, nil
+}
+
+// ── 聚合订阅 ──
+
+// LoadMergedSubscriptions 读取指定子订阅的缓存数据，合并去重后返回
+func LoadMergedSubscriptions(sourceIDs []string) (*FetchResult, error) {
+	allNodes := make(map[string]models.ProxyNode) // tag → node, dedup by tag
+	var rawLines []string
+	var rawText string
+
+	for _, sid := range sourceIDs {
+		data, err := GetCachedSubscriptionData(sid)
+		if err != nil {
+			continue // 跳过没有缓存数据的
+		}
+		for _, n := range data.Nodes {
+			allNodes[n.Tag] = n
+		}
+		if rawText == "" && data.RawText != "" {
+			rawText = data.RawText
+		}
+		rawLines = append(rawLines, data.RawLines...)
+	}
+
+	var nodes []models.ProxyNode
+	for _, n := range allNodes {
+		nodes = append(nodes, n)
+	}
+
+	return &FetchResult{
+		RawText:   rawText,
+		RawLines:  rawLines,
+		NodeCount: len(nodes),
+		Nodes:     nodes,
+		UpdatedAt: time.Now().Format("2006-01-02 15:04:05"),
+	}, nil
+}
+
+// CreateMergedSubscription 创建聚合订阅
+func CreateMergedSubscription(name string, sourceIDs []string, extraURL string) (*models.Subscription, *FetchResult, error) {
+	// 先合并已有订阅的数据
+	result, err := LoadMergedSubscriptions(sourceIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// 如果有额外订阅链接，拉取并合并
+	if extraURL != "" {
+		extraResult, err := FetchAndParseURL(extraURL)
+		if err != nil {
+			return nil, nil, fmt.Errorf("额外订阅拉取失败: %w", err)
+		}
+		for _, n := range extraResult.Nodes {
+			found := false
+			for _, existing := range result.Nodes {
+				if existing.Tag == n.Tag {
+					found = true
+					break
+				}
+			}
+			if !found {
+				result.Nodes = append(result.Nodes, n)
+			}
+		}
+		result.NodeCount = len(result.Nodes)
+		result.RawLines = append(result.RawLines, extraResult.RawLines...)
+	}
+
+	if result.NodeCount == 0 {
+		return nil, nil, fmt.Errorf("合并后无有效节点")
+	}
+
+	// 创建订阅记录
+	store, err := LoadSubscriptions()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	sub := models.Subscription{
+		ID:         fmt.Sprintf("sub_%d", time.Now().UnixMilli()),
+		Name:       name,
+		URL:        extraURL, // 主链接用 extra URL（如果有）
+		Aggregated: true,
+		Sources:    sourceIDs,
+	}
+	if extraURL == "" {
+		sub.URL = fmt.Sprintf("merged:%d", len(sourceIDs))
+	}
+
+	store.Subscriptions = append(store.Subscriptions, sub)
+	if err := SaveSubscriptions(store); err != nil {
+		return nil, nil, err
+	}
+
+	// 保存合并后的缓存数据
+	SaveFetchResult(sub.ID, result)
+
+	// 更新 node_count
+	for i := range store.Subscriptions {
+		if store.Subscriptions[i].ID == sub.ID {
+			store.Subscriptions[i].NodeCount = result.NodeCount
+			store.Subscriptions[i].LastUpdated = result.UpdatedAt
+		}
+	}
+	SaveSubscriptions(store)
+
+	return &sub, result, nil
+}
+
 // ── 应用订阅到 sing-box（切换订阅） ──
 
 func ApplySubscription(id string) error {
-	// 从缓存读取
-	data, err := os.ReadFile(filepath.Join(config.DataDir, "subscription_data", id+".json"))
+	// 查找订阅记录
+	store, err := LoadSubscriptions()
 	if err != nil {
-		return fmt.Errorf("请先拉取解析订阅: %w", err)
+		return err
 	}
-	var cached FetchResult
-	if err := json.Unmarshal(data, &cached); err != nil {
-		return fmt.Errorf("缓存数据损坏: %w", err)
+	var sub *models.Subscription
+	for i := range store.Subscriptions {
+		if store.Subscriptions[i].ID == id {
+			sub = &store.Subscriptions[i]
+			break
+		}
+	}
+	if sub == nil {
+		return fmt.Errorf("订阅未找到: %s", id)
+	}
+
+	// 读取节点数据
+	var cached *FetchResult
+	if sub.Aggregated {
+		cached, err = LoadMergedSubscriptions(sub.Sources)
+		if err != nil {
+			return fmt.Errorf("合并子订阅失败: %w", err)
+		}
+		// 如果有额外链接且有缓存数据，也合并
+		if sub.URL != "" && !strings.HasPrefix(sub.URL, "merged:") {
+			extra, e := GetCachedSubscriptionData(id)
+			if e == nil && extra != nil {
+				existing := make(map[string]bool)
+				for _, n := range cached.Nodes {
+					existing[n.Tag] = true
+				}
+				for _, n := range extra.Nodes {
+					if !existing[n.Tag] {
+						cached.Nodes = append(cached.Nodes, n)
+					}
+				}
+				cached.NodeCount = len(cached.Nodes)
+			}
+		}
+	} else {
+		data, e := os.ReadFile(filepath.Join(config.DataDir, "subscription_data", id+".json"))
+		if e != nil {
+			return fmt.Errorf("请先拉取解析订阅: %w", e)
+		}
+		if e := json.Unmarshal(data, &cached); e != nil {
+			return fmt.Errorf("缓存数据损坏: %w", e)
+		}
 	}
 
 	cfg, err := loadSingBoxConfig()
