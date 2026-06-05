@@ -61,6 +61,7 @@ func AddSubscription(name, url string) (*models.Subscription, error) {
 		ID:   fmt.Sprintf("sub_%d", time.Now().UnixMilli()),
 		Name: name,
 		URL:  url,
+		Kind: models.KindURL,
 	}
 	store.Subscriptions = append(store.Subscriptions, sub)
 	if err := SaveSubscriptions(store); err != nil {
@@ -238,41 +239,105 @@ func FetchAndParseSubscription(id string) (*FetchResult, error) {
 	return result, nil
 }
 
-// ── 拉取+解析外部 URL ──
-
-// FetchAndParseURL 从 URL 拉取并解析节点
-func FetchAndParseURL(subURL string) (*FetchResult, error) {
-	raw, err := FetchRaw(subURL)
-	if err != nil {
-		return nil, err
-	}
-	result := ParseRaw(raw)
-	if result.NodeCount == 0 {
-		return nil, fmt.Errorf("未解析到有效节点")
-	}
-	return result, nil
-}
-
 // ── 聚合订阅 ──
 
-// LoadMergedSubscriptions 读取指定子订阅的缓存数据，合并去重后返回
-func LoadMergedSubscriptions(sourceIDs []string) (*FetchResult, error) {
-	allNodes := make(map[string]models.ProxyNode) // tag → node, dedup by tag
-	var rawLines []string
-	var rawText string
-
-	for _, sid := range sourceIDs {
-		data, err := GetCachedSubscriptionData(sid)
+// resolveSource 解析单个子源（已有订阅 ID 或临时 URL）并返回结果
+func resolveSource(sourceID, sourceURL string) (int, []models.ProxyNode, string, error) {
+	if sourceID != "" {
+		// 已有订阅：读取缓存
+		data, err := GetCachedSubscriptionData(sourceID)
 		if err != nil {
-			continue // 跳过没有缓存数据的
+			return 0, nil, "", fmt.Errorf("读取缓存失败: %w", err)
 		}
-		for _, n := range data.Nodes {
+		return data.NodeCount, data.Nodes, "", nil
+	}
+
+	if sourceURL != "" {
+		// 临时链接：拉取并解析
+		raw, err := FetchRaw(sourceURL)
+		if err != nil {
+			return 0, nil, "", fmt.Errorf("拉取失败: %w", err)
+		}
+		result := ParseRaw(raw)
+		if result.NodeCount == 0 {
+			return 0, nil, "", fmt.Errorf("未解析到有效节点")
+		}
+		return result.NodeCount, result.Nodes, "", nil
+	}
+
+	return 0, nil, "", fmt.Errorf("空源")
+}
+
+// resolveSourceWithLabel 解析单个子源并返回带名称的 SubscriptionSource
+func resolveSourceWithLabel(sourceID, sourceURL string) models.SubscriptionSource {
+	result := models.SubscriptionSource{
+		ID:  sourceID,
+		URL: sourceURL,
+	}
+
+	if sourceID != "" {
+		// 从已知订阅中找到名称
+		store, err := LoadSubscriptions()
+		if err == nil {
+			for _, s := range store.Subscriptions {
+				if s.ID == sourceID {
+					result.Name = s.Name
+					break
+				}
+			}
+		}
+		count, _, _, err := resolveSource(sourceID, "")
+		result.NodeCount = count
+		if err != nil {
+			result.Status = "error"
+			result.Error = err.Error()
+		} else {
+			result.Status = "ok"
+		}
+		return result
+	}
+
+	if sourceURL != "" {
+		result.Name = sourceURL
+		count, _, _, err := resolveSource("", sourceURL)
+		result.NodeCount = count
+		if err != nil {
+			result.Status = "error"
+			result.Error = err.Error()
+		} else {
+			result.Status = "ok"
+		}
+		return result
+	}
+
+	result.Status = "error"
+	result.Error = "空源"
+	return result
+}
+
+// LoadMergedSubscriptions 读取指定子源列表并合并去重
+// 返回：合并后的节点 + 各子源状态
+func LoadMergedSubscriptions(sources []models.SubscriptionSource) ([]models.ProxyNode, []models.SubscriptionSource) {
+	allNodes := make(map[string]models.ProxyNode)
+	var results []models.SubscriptionSource
+
+	for _, src := range sources {
+		srcResult := resolveSourceWithLabel(src.ID, src.URL)
+		results = append(results, srcResult)
+
+		if srcResult.Status != "ok" {
+			continue
+		}
+
+		// 解析成功：合并节点
+		count, nodes, _, _ := resolveSource(src.ID, src.URL)
+		if len(nodes) == 0 {
+			count, nodes, _, _ = resolveSource(src.ID, src.URL)
+		}
+		_ = count
+		for _, n := range nodes {
 			allNodes[n.Tag] = n
 		}
-		if rawText == "" && data.RawText != "" {
-			rawText = data.RawText
-		}
-		rawLines = append(rawLines, data.RawLines...)
 	}
 
 	var nodes []models.ProxyNode
@@ -280,84 +345,88 @@ func LoadMergedSubscriptions(sourceIDs []string) (*FetchResult, error) {
 		nodes = append(nodes, n)
 	}
 
-	return &FetchResult{
-		RawText:   rawText,
-		RawLines:  rawLines,
-		NodeCount: len(nodes),
-		Nodes:     nodes,
-		UpdatedAt: time.Now().Format("2006-01-02 15:04:05"),
-	}, nil
+	return nodes, results
 }
 
 // CreateMergedSubscription 创建聚合订阅
-func CreateMergedSubscription(name string, sourceIDs []string, extraURL string) (*models.Subscription, *FetchResult, error) {
-	// 先合并已有订阅的数据
-	result, err := LoadMergedSubscriptions(sourceIDs)
-	if err != nil {
-		return nil, nil, err
+func CreateMergedSubscription(name string, sourceIDs []string, extraURLs []string) (*models.Subscription, []models.ProxyNode, []models.SubscriptionSource, error) {
+	// 构建子源列表
+	var sources []models.SubscriptionSource
+	for _, sid := range sourceIDs {
+		sources = append(sources, models.SubscriptionSource{ID: sid})
+	}
+	for _, u := range extraURLs {
+		sources = append(sources, models.SubscriptionSource{URL: u})
 	}
 
-	// 如果有额外订阅链接，拉取并合并
-	if extraURL != "" {
-		extraResult, err := FetchAndParseURL(extraURL)
-		if err != nil {
-			return nil, nil, fmt.Errorf("额外订阅拉取失败: %w", err)
-		}
-		for _, n := range extraResult.Nodes {
-			found := false
-			for _, existing := range result.Nodes {
-				if existing.Tag == n.Tag {
-					found = true
-					break
-				}
-			}
-			if !found {
-				result.Nodes = append(result.Nodes, n)
-			}
-		}
-		result.NodeCount = len(result.Nodes)
-		result.RawLines = append(result.RawLines, extraResult.RawLines...)
-	}
-
-	if result.NodeCount == 0 {
-		return nil, nil, fmt.Errorf("合并后无有效节点")
-	}
+	nodes, results := LoadMergedSubscriptions(sources)
 
 	// 创建订阅记录
 	store, err := LoadSubscriptions()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	sub := models.Subscription{
-		ID:         fmt.Sprintf("sub_%d", time.Now().UnixMilli()),
-		Name:       name,
-		URL:        extraURL, // 主链接用 extra URL（如果有）
-		Aggregated: true,
-		Sources:    sourceIDs,
-	}
-	if extraURL == "" {
-		sub.URL = fmt.Sprintf("merged:%d", len(sourceIDs))
+		ID:      fmt.Sprintf("sub_%d", time.Now().UnixMilli()),
+		Name:    name,
+		Kind:    models.KindAggregated,
+		Sources: results,
 	}
 
 	store.Subscriptions = append(store.Subscriptions, sub)
 	if err := SaveSubscriptions(store); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
-	// 保存合并后的缓存数据
-	SaveFetchResult(sub.ID, result)
-
-	// 更新 node_count
+	// 更新 node_count 和 last_updated
+	sub.NodeCount = len(nodes)
+	sub.LastUpdated = time.Now().Format("2006-01-02 15:04:05")
 	for i := range store.Subscriptions {
 		if store.Subscriptions[i].ID == sub.ID {
-			store.Subscriptions[i].NodeCount = result.NodeCount
-			store.Subscriptions[i].LastUpdated = result.UpdatedAt
+			store.Subscriptions[i] = sub
 		}
 	}
 	SaveSubscriptions(store)
 
-	return &sub, result, nil
+	return &sub, nodes, results, nil
+}
+
+// UpdateAggregatedSubscription 更新聚合订阅（重新解析所有子源）
+func UpdateAggregatedSubscription(subID string) ([]models.ProxyNode, []models.SubscriptionSource, error) {
+	store, err := LoadSubscriptions()
+	if err != nil {
+		return nil, nil, fmt.Errorf("加载订阅失败: %w", err)
+	}
+
+	var sub *models.Subscription
+	for i := range store.Subscriptions {
+		if store.Subscriptions[i].ID == subID {
+			sub = &store.Subscriptions[i]
+			break
+		}
+	}
+	if sub == nil {
+		return nil, nil, fmt.Errorf("订阅未找到: %s", subID)
+	}
+	if sub.Kind != models.KindAggregated {
+		return nil, nil, fmt.Errorf("非聚合订阅无法更新: %s", subID)
+	}
+
+	nodes, results := LoadMergedSubscriptions(sub.Sources)
+
+	sub.Sources = results
+	sub.NodeCount = len(nodes)
+	sub.LastUpdated = time.Now().Format("2006-01-02 15:04:05")
+
+	for i := range store.Subscriptions {
+		if store.Subscriptions[i].ID == subID {
+			store.Subscriptions[i] = *sub
+		}
+	}
+	SaveSubscriptions(store)
+
+	return nodes, results, nil
 }
 
 // ── 应用订阅到 sing-box（切换订阅） ──
@@ -380,36 +449,19 @@ func ApplySubscription(id string) error {
 	}
 
 	// 读取节点数据
-	var cached *FetchResult
-	if sub.Aggregated {
-		cached, err = LoadMergedSubscriptions(sub.Sources)
-		if err != nil {
-			return fmt.Errorf("合并子订阅失败: %w", err)
-		}
-		// 如果有额外链接且有缓存数据，也合并
-		if sub.URL != "" && !strings.HasPrefix(sub.URL, "merged:") {
-			extra, e := GetCachedSubscriptionData(id)
-			if e == nil && extra != nil {
-				existing := make(map[string]bool)
-				for _, n := range cached.Nodes {
-					existing[n.Tag] = true
-				}
-				for _, n := range extra.Nodes {
-					if !existing[n.Tag] {
-						cached.Nodes = append(cached.Nodes, n)
-					}
-				}
-				cached.NodeCount = len(cached.Nodes)
-			}
-		}
+	var cachedNodes []models.ProxyNode
+	if sub.Kind == models.KindAggregated {
+		cachedNodes, _ = LoadMergedSubscriptions(sub.Sources)
 	} else {
 		data, e := os.ReadFile(filepath.Join(config.DataDir, "subscription_data", id+".json"))
 		if e != nil {
 			return fmt.Errorf("请先拉取解析订阅: %w", e)
 		}
+		var cached FetchResult
 		if e := json.Unmarshal(data, &cached); e != nil {
 			return fmt.Errorf("缓存数据损坏: %w", e)
 		}
+		cachedNodes = cached.Nodes
 	}
 
 	cfg, err := loadSingBoxConfig()
@@ -432,7 +484,7 @@ func ApplySubscription(id string) error {
 	}
 
 	var newOutbounds []interface{}
-	for _, n := range cached.Nodes {
+	for _, n := range cachedNodes {
 		ob := map[string]interface{}{
 			"type":        n.Type,
 			"tag":         n.Tag,
@@ -476,7 +528,7 @@ func ApplySubscription(id string) error {
 	var tags []string
 	regionGroups := make(map[string][]string)
 	infoKws := []string{"流量", "套餐", "到期", "剩余", "过滤"}
-	for _, n := range cached.Nodes {
+	for _, n := range cachedNodes {
 		if n.Type != "vmess" {
 			continue
 		}

@@ -93,23 +93,22 @@ export default function SubscriptionsPage() {
     if (!mergeName) return
     if (mergeSources.size === 0 && !mergeExtraUrl) return
     setLoading(true)
+    // 多个链接用换行分隔
+    const urls = mergeExtraUrl.split('\n').map((s: string) => s.trim()).filter(Boolean)
     const r = await api('/api/subscriptions/merge', {
       method: 'POST',
       body: JSON.stringify({
         name: mergeName,
         sources: Array.from(mergeSources),
-        extra_url: mergeExtraUrl || undefined,
+        extra_urls: urls.length > 0 ? urls : undefined,
       }),
     })
     if (r.ok) {
       const sub = r.data.subscription
-      const result = r.data.result
       setMergeName('')
       setMergeSources(new Set())
       setMergeExtraUrl('')
       setShowMerge(false)
-      setCachedData(prev => ({ ...prev, [sub.id]: result }))
-      setExpandedId(sub.id)
       await loadSubs()
     } else {
       alert(r.error || '聚合失败')
@@ -189,9 +188,10 @@ export default function SubscriptionsPage() {
           )}
 
           <div className="mb-3">
-            <label className="text-xs text-gray-500 mb-1 block">额外订阅链接（可选）</label>
-            <input value={mergeExtraUrl} onChange={e => setMergeExtraUrl(e.target.value)}
-              placeholder="https://..."
+            <label className="text-xs text-gray-500 mb-1 block">额外订阅链接（可选，每行一个）</label>
+            <textarea value={mergeExtraUrl} onChange={e => setMergeExtraUrl(e.target.value)}
+              placeholder="https://sub1.example.com&#10;https://sub2.example.com"
+              rows={3}
               className="w-full bg-[#0f1419] border border-[var(--border)] rounded-lg px-3 py-2 text-sm" />
           </div>
 
@@ -206,9 +206,14 @@ export default function SubscriptionsPage() {
         <div key={sub.id} className="bg-[var(--surface)] rounded-xl p-4 mb-3 border border-[var(--border)]">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
-              {sub.aggregated && (
+              {sub.kind === 'aggregated' && (
                 <span className="text-[10px] px-1 py-0.5 rounded bg-purple-500/20 text-purple-400 font-mono">
                   聚合
+                </span>
+              )}
+              {sub.kind === 'ad_hoc' && (
+                <span className="text-[10px] px-1 py-0.5 rounded bg-yellow-500/20 text-yellow-400 font-mono">
+                  临时
                 </span>
               )}
               <span className="font-semibold">{sub.name}
@@ -234,16 +239,25 @@ export default function SubscriptionsPage() {
           <div className="text-xs text-gray-500 truncate">{sub.url}</div>
 
           {/* 聚合订阅的子源显示 */}
-          {sub.aggregated && sub.sources && sub.sources.length > 0 && (
+          {sub.kind === 'aggregated' && sub.sources && sub.sources.length > 0 && (
             <div className="mt-1 flex flex-wrap gap-1">
-              {sub.sources.map((sid: string) => {
-                const src = subs.find((s: any) => s.id === sid)
-                return (
-                  <span key={sid} className="text-[10px] px-1 py-0.5 rounded bg-gray-500/20 text-gray-400">
-                    {src?.name || sid.slice(0, 12)}
-                  </span>
-                )
-              })}
+              {sub.sources.map((src: any, i: number) => (
+                <span
+                  key={i}
+                  className={`text-[10px] px-1 py-0.5 rounded ${
+                    src.status === 'error'
+                      ? 'bg-red-500/20 text-red-400'
+                      : src.status === 'ok'
+                      ? 'bg-green-500/20 text-green-400'
+                      : 'bg-gray-500/20 text-gray-400'
+                  }`}
+                  title={src.error || ''}
+                >
+                  {src.name || src.id?.slice(0, 10) || src.url?.slice(0, 30)}
+                  {src.node_count > 0 && ` (${src.node_count})`}
+                  {src.status === 'error' && ' ⚠'}
+                </span>
+              ))}
             </div>
           )}
 

@@ -173,6 +173,28 @@ func handleDeleteSubscription(w http.ResponseWriter, r *http.Request) {
 
 func handleFetchSubscription(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+
+	// 检查是否是聚合订阅
+	store, err := services.LoadSubscriptions()
+	if err == nil {
+		for _, s := range store.Subscriptions {
+			if s.ID == id && s.Kind == models.KindAggregated {
+				nodes, sources, err := services.UpdateAggregatedSubscription(id)
+				if err != nil {
+					sendError(w, 500, "更新聚合订阅失败: "+err.Error())
+					return
+				}
+				sendOK(w, map[string]interface{}{
+					"node_count": len(nodes),
+					"nodes":      nodes,
+					"sources":    sources,
+				})
+				return
+			}
+		}
+	}
+
+	// 普通订阅
 	result, err := services.FetchAndParseSubscription(id)
 	if err != nil {
 		sendError(w, 500, err.Error())
@@ -211,19 +233,20 @@ func handleMergeSubscriptions(w http.ResponseWriter, r *http.Request) {
 		sendError(w, 400, "name is required")
 		return
 	}
-	if len(req.Sources) == 0 && req.ExtraURL == "" {
+	if len(req.Sources) == 0 && len(req.ExtraURLs) == 0 {
 		sendError(w, 400, "至少选择一个订阅或填写订阅链接")
 		return
 	}
 
-	sub, result, err := services.CreateMergedSubscription(req.Name, req.Sources, req.ExtraURL)
+	sub, nodes, sources, err := services.CreateMergedSubscription(req.Name, req.Sources, req.ExtraURLs)
 	if err != nil {
 		sendError(w, 500, "创建聚合订阅失败: "+err.Error())
 		return
 	}
 	sendOK(w, map[string]interface{}{
 		"subscription": sub,
-		"result":       result,
+		"nodes":        nodes,
+		"sources":      sources,
 	})
 }
 
