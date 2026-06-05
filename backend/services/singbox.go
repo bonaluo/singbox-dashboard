@@ -103,7 +103,7 @@ func GetStatus() models.StatusResponse {
 		for _, ob := range cfg["outbounds"].([]interface{}) {
 			m := ob.(map[string]interface{})
 			t := m["type"].(string)
-			if t != "selector" && t != "direct" && t != "block" && t != "dns" {
+			if t != "selector" && t != "direct" && t != "block" && t != "dns" && t != "urltest" {
 				total++
 			}
 		}
@@ -316,7 +316,7 @@ func GetProxyDelay(tag string, timeout int) int {
 
 // ── 出站组管理 ──
 
-func CreateGroup(name string, nodes []string) error {
+func CreateGroup(name, groupType string, nodes []string) error {
 	cfg, err := loadSingBoxConfig()
 	if err != nil {
 		return fmt.Errorf("加载配置失败: %w", err)
@@ -330,10 +330,15 @@ func CreateGroup(name string, nodes []string) error {
 		}
 	}
 
-	// 创建 selector 出站
+	// 默认 selector
+	if groupType == "" {
+		groupType = "selector"
+	}
+
+	// 创建出站组
 	group := map[string]interface{}{
 		"tag":       name,
-		"type":      "selector",
+		"type":      groupType,
 		"outbounds": nodes,
 	}
 

@@ -423,24 +423,41 @@ func handleListGroups(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleCreateGroup(w http.ResponseWriter, r *http.Request) {
-	var req models.GroupRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		sendError(w, 400, "invalid JSON")
+	body := readBody(r)
+	name, _ := body["name"].(string)
+	groupType, _ := body["type"].(string)
+	nodesRaw, _ := body["nodes"].([]interface{})
+
+	if name == "" {
+		sendError(w, 400, "name required")
 		return
 	}
-	if req.Name == "" {
-		sendError(w, 400, "name is required")
+	if len(nodesRaw) == 0 {
+		sendError(w, 400, "nodes required")
 		return
 	}
-	if len(req.Nodes) == 0 {
-		sendError(w, 400, "至少选择一个节点")
+	var nodes []string
+	for _, n := range nodesRaw {
+		if s, ok := n.(string); ok {
+			nodes = append(nodes, s)
+		}
+	}
+	if len(nodes) == 0 {
+		sendError(w, 400, "nodes required")
 		return
 	}
-	if err := services.CreateGroup(req.Name, req.Nodes); err != nil {
-		sendError(w, 500, "创建组失败: "+err.Error())
+	if groupType == "" {
+		groupType = "selector"
+	}
+	if groupType != "selector" && groupType != "urltest" {
+		sendError(w, 400, "type must be selector or urltest")
 		return
 	}
-	sendOK(w, map[string]string{"created": req.Name})
+	if err := services.CreateGroup(name, groupType, nodes); err != nil {
+		sendError(w, 500, err.Error())
+		return
+	}
+	sendOK(w, map[string]string{"created": name})
 }
 
 func handleDeleteGroup(w http.ResponseWriter, r *http.Request) {

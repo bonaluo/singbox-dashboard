@@ -24,6 +24,7 @@ export default function GroupManager() {
   const [groups, setGroups] = useState<GroupInfo[]>([])
   const [showCreate, setShowCreate] = useState(false)
   const [groupName, setGroupName] = useState('')
+  const [groupType, setGroupType] = useState('selector')
   const [checkedNodes, setCheckedNodes] = useState<Set<string>>(new Set())
   const [checkedGroups, setCheckedGroups] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(false)
@@ -78,10 +79,12 @@ export default function GroupManager() {
       method: 'POST',
       body: JSON.stringify({
         name: groupName,
+        type: groupType,
         nodes: [...Array.from(checkedNodes), ...Array.from(checkedGroups)],
       }),
     })
     setGroupName('')
+    setGroupType('selector')
     setCheckedNodes(new Set())
     setCheckedGroups(new Set())
     setShowCreate(false)
@@ -126,6 +129,17 @@ export default function GroupManager() {
                 placeholder="例如: 香港节点组"
                 className="w-full bg-[#0f1419] border border-[var(--border)] rounded-lg px-3 py-2 text-sm"
               />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">类型</label>
+              <select
+                value={groupType}
+                onChange={e => setGroupType(e.target.value)}
+                className="bg-[#0f1419] border border-[var(--border)] rounded-lg px-3 py-2 text-sm"
+              >
+                <option value="selector">Selector（手动选择）</option>
+                <option value="urltest">URLTest（自动选低延迟）</option>
+              </select>
             </div>
             <div className="flex gap-2 items-center">
               <button

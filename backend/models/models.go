@@ -108,6 +108,7 @@ type RuleStore struct {
 
 type GroupRequest struct {
 	Name  string   `json:"name"`
+	Type  string   `json:"type"` // "selector" / "urltest"
 	Nodes []string `json:"nodes"`
 }
 
