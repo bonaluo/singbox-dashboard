@@ -38,3 +38,19 @@ jobs:
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/singbox-dashboard-frontend:${{ env.VERSION }}
             ${{ secrets.DOCKER_USERNAME }}/singbox-dashboard-frontend:latest
+
+      - name: Update Docker Hub repository descriptions
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+        run: |
+          DESCRIPTION=$(cat DOCKER_HUB.md | jq -Rs .)
+
+          for REPO in singbox-dashboard-backend singbox-dashboard-frontend; do
+            echo "Updating description for $REPO..."
+            curl -sS -X PATCH \
+              -H "Content-Type: application/json" \
+              -u "${DOCKER_USERNAME}:${DOCKER_TOKEN}" \
+              -d "{\"full_description\": ${DESCRIPTION}}" \
+              "https://hub.docker.com/v2/repositories/${DOCKER_USERNAME}/${REPO}/"
+          done
