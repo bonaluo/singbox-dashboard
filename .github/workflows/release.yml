@@ -46,6 +46,7 @@ jobs:
           password: ${{ secrets.DOCKER_TOKEN }}
           repository: ${{ secrets.DOCKER_USERNAME }}/singbox-dashboard-backend
           readme-filepath: ./DOCKER_HUB.md
+          short-description: sing-box dashboard backend (Go API + sing-box core)
 
       - name: Update Docker Hub frontend description
         uses: peter-evans/dockerhub-description@v5
@@ -54,3 +55,4 @@ jobs:
           password: ${{ secrets.DOCKER_TOKEN }}
           repository: ${{ secrets.DOCKER_USERNAME }}/singbox-dashboard-frontend
           readme-filepath: ./DOCKER_HUB.md
+          short-description: sing-box dashboard web frontend (Next.js)
