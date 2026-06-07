@@ -4,6 +4,8 @@
 
 **预构建镜像，开箱即用。**
 
+GitHub 仓库：[bonaluo/singbox-dashboard](https://github.com/bonaluo/singbox-dashboard)
+
 ## 镜像说明
 
 | 镜像 | 说明 |
