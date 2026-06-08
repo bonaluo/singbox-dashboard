@@ -25,6 +25,7 @@ services:
     volumes:
       - ./data:/data
     environment:
+      - TZ=Asia/Shanghai
       - SINGBOX_CONFIG=/data/sing-box-config.json
       - CLASH_API=http://127.0.0.1:9090
       - DASHBOARD_DATA_DIR=/data
@@ -69,6 +70,7 @@ docker compose up -d
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
+| `TZ` | `Asia/Shanghai` | 容器时区，Go 日志时间戳以此为准 |
 | `SINGBOX_CONFIG` | `/data/sing-box-config.json` | sing-box 配置文件路径 |
 | `CLASH_API` | `http://127.0.0.1:9090` | Clash REST API 地址 |
 | `DASHBOARD_DATA_DIR` | `/data` | 数据目录 |

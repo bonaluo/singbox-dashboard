@@ -1,36 +1,31 @@
+# singbox-dashboard — base compose (no build section, no network_mode)
+# 本地开发:  ./build.sh  (自动检测平台, 构建+启动)
+# 生产部署:  docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# 参数:
+#   TAG          — 镜像标签 (默认 latest)
+#   DATA_DIR     — 数据挂载目录
+#   FRONTEND_PORT — 前端端口 (仅 bridge 模式)
+
 services:
   backend:
-    build:
-      context: ./backend
-      args:
-        GIT_COMMIT: ${GIT_COMMIT:-unknown}
-        GO_IMAGE: ${GO_IMAGE:-golang:1.25-alpine}
-    image: singbox-backend:${TAG:-local}
+    image: ${BACKEND_IMAGE:-bonaluo/singbox-dashboard-backend}:${TAG:-latest}
     container_name: singbox-backend
-    network_mode: host
     volumes:
-      - /mnt/g/docker/singbox-dashboard/data:/data
+      - ${DATA_DIR:-./data}:/data
     environment:
+      - TZ=Asia/Shanghai
       - SINGBOX_CONFIG=/data/sing-box-config.json
       - CLASH_API=http://127.0.0.1:9090
       - DASHBOARD_DATA_DIR=/data
-      - GIT_COMMIT=${GIT_COMMIT:-unknown}
     restart: unless-stopped
 
   frontend:
-    build:
-      context: ./frontend
-      args:
-        GIT_COMMIT: ${GIT_COMMIT:-unknown}
-        NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
-        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
-    image: singbox-frontend:${TAG:-local}
+    image: ${FRONTEND_IMAGE:-bonaluo/singbox-dashboard-frontend}:${TAG:-latest}
     container_name: singbox-frontend
-    network_mode: host
     environment:
       - HOSTNAME=0.0.0.0
-      - PORT=9000
-      - NEXT_PUBLIC_GIT_COMMIT=${GIT_COMMIT:-unknown}
+      - PORT=${FRONTEND_PORT:-3000}
     restart: unless-stopped
     depends_on:
       - backend
