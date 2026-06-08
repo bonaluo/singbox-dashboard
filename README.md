@@ -60,9 +60,23 @@ cp .env.example .env    # 编辑 .env 中 NETWORK_MODE 等参数
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 ```
 
+> **注意**：如果 Docker Hub 拉取超时（中国大陆常见），参考 [DOCKER_HUB.md](./DOCKER_HUB.md) 的"镜像拉取加速"章节配置代理或改用 `./build.sh` 源码构建。
+
 ### 访问
 
-Docker Hub 镜像页面：[bonaluo/singbox-dashboard-backend](https://hub.docker.com/r/bonaluo/singbox-dashboard-backend) / [bonaluo/singbox-dashboard-frontend](https://hub.docker.com/r/bonaluo/singbox-dashboard-frontend)
+### 首次使用
+
+启动后后端自动等待订阅。通过仪表板三步完成配置：
+
+1. 打开浏览器访问 http://localhost:9000
+2. 点击左侧 **📡 订阅**
+3. 点击 **添加订阅**，填写名称和订阅链接后确认
+4. 在订阅列表中点击 **拉取** 解析节点数据
+5. 点击 **应用** 生成 sing-box 配置并启动代理
+
+之后即可通过代理端口使用（默认 `socks5://localhost:2080`）。
+
+### 访问
 
 | 服务 | 地址 |
 |------|------|
@@ -77,7 +91,7 @@ Docker Hub 镜像页面：[bonaluo/singbox-dashboard-backend](https://hub.docker
 
 ```
 data/
-├── sing-box-config.json    # sing-box 运行配置
+├── sing-box-config.json    # sing-box 运行配置（订阅 apply 时自动生成）
 ├── sing-box.log            # sing-box 运行日志
 ├── rules.json              # 路由规则
 ├── subscriptions.json       # 订阅列表

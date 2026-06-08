@@ -6,6 +6,23 @@
 
 GitHub 仓库：[bonaluo/singbox-dashboard](https://github.com/bonaluo/singbox-dashboard)
 
+## 国内镜像
+
+Docker Hub 可能拉取超时。Docker 启动时添加 `--registry-mirror` 参数即可：
+
+```bash
+sudo tee -a /etc/docker/daemon.json <<< '"registry-mirrors": ["https://docker.m.daocloud.io"]'
+sudo systemctl restart docker
+```
+
+或在 `docker-compose.yml` 中直接使用镜像前缀：
+
+```yaml
+image: docker.m.daocloud.io/bonaluo/singbox-dashboard-backend:latest
+```
+
+> 也可源码构建：`git clone` 后运行 `./build.sh`（自带镜像加速）。
+
 ## 镜像说明
 
 | 镜像 | 说明 |
@@ -53,7 +70,6 @@ services:
     network_mode: ${NETWORK_MODE:-bridge}
     environment:
       - HOSTNAME=0.0.0.0
-      - PORT=${FRONTEND_PORT:-3000}
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
     restart: unless-stopped
@@ -68,6 +84,16 @@ docker compose up -d
 ```
 
 > **网络模式说明**：macOS/Windows Docker Desktop 必须用 `bridge`（默认）。Linux/WSL2 可以用 `host` 模式（`NETWORK_MODE=host .env` 中设置），此时 `ports` 映射会被忽略（仅警告无错误）。
+
+### 4. 添加订阅
+
+1. 打开浏览器访问 http://localhost:9000
+2. 点击左侧 **📡 订阅**
+3. 点击 **添加订阅**，填写名称和订阅链接
+4. 添加后点击 **拉取** 解析节点数据
+5. 点击 **应用** 生成 sing-box 配置并启动代理
+
+代理端口默认为 `socks5://localhost:2080`，可在 `.env` 中修改 `SINGBOX_MIXED_PORT`。
 
 ## 访问
 
