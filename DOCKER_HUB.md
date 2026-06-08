@@ -15,37 +15,59 @@ GitHub 仓库：[bonaluo/singbox-dashboard](https://github.com/bonaluo/singbox-d
 
 ## 快速部署
 
+### 1. 准备 `.env` 文件
+
+```ini
+NETWORK_MODE=bridge          # macOS/Windows 选 bridge，Linux/WSL2 可选 host
+DATA_DIR=./data              # 数据目录
+FRONTEND_PORT=3000           # 前端端口
+BACKEND_PORT=9092            # 后端端口
+SINGBOX_MIXED_PORT=2080      # 代理端口
+SINGBOX_CLASH_PORT=9090      # Clash API 端口
+```
+
+### 2. 创建 `docker-compose.yml`
+
 ```yaml
-# docker-compose.yml
 services:
   backend:
     image: bonaluo/singbox-dashboard-backend:latest
     container_name: singbox-backend
-    network_mode: host
+    network_mode: ${NETWORK_MODE:-bridge}
     volumes:
-      - ./data:/data
+      - ${DATA_DIR:-./data}:/data
     environment:
       - TZ=Asia/Shanghai
       - SINGBOX_CONFIG=/data/sing-box-config.json
       - CLASH_API=http://127.0.0.1:9090
       - DASHBOARD_DATA_DIR=/data
+    ports:
+      - "${BACKEND_PORT:-9092}:9092"
+      - "${SINGBOX_MIXED_PORT:-2080}:2080"
+      - "${SINGBOX_CLASH_PORT:-9090}:9090"
     restart: unless-stopped
 
   frontend:
     image: bonaluo/singbox-dashboard-frontend:latest
     container_name: singbox-frontend
-    network_mode: host
+    network_mode: ${NETWORK_MODE:-bridge}
     environment:
       - HOSTNAME=0.0.0.0
-      - PORT=9000
+      - PORT=${FRONTEND_PORT:-3000}
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
     restart: unless-stopped
     depends_on:
       - backend
 ```
 
+### 3. 启动
+
 ```bash
 docker compose up -d
 ```
+
+> **网络模式说明**：macOS/Windows Docker Desktop 必须用 `bridge`（默认）。Linux/WSL2 可以用 `host` 模式（`NETWORK_MODE=host .env` 中设置），此时 `ports` 映射会被忽略（仅警告无错误）。
 
 ## 访问
 

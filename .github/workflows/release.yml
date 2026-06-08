@@ -10,6 +10,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Set version
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
 
@@ -19,27 +25,33 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
 
-      - name: Build & push backend
+      - name: Build & push backend (multi-arch)
         uses: docker/build-push-action@v5
         with:
           context: ./backend
           build-args: |
             GIT_COMMIT=${{ github.sha }}
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/singbox-dashboard-backend:${{ env.VERSION }}
             ${{ secrets.DOCKER_USERNAME }}/singbox-dashboard-backend:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-      - name: Build & push frontend
+      - name: Build & push frontend (multi-arch)
         uses: docker/build-push-action@v5
         with:
           context: ./frontend
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/singbox-dashboard-frontend:${{ env.VERSION }}
             ${{ secrets.DOCKER_USERNAME }}/singbox-dashboard-frontend:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-      - name: Update Docker Hub repository descriptions
+      - name: Update Docker Hub description (backend)
         uses: peter-evans/dockerhub-description@v5
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
@@ -48,7 +60,7 @@ jobs:
           readme-filepath: ./DOCKER_HUB.md
           short-description: sing-box dashboard backend (Go API + sing-box core)
 
-      - name: Update Docker Hub frontend description
+      - name: Update Docker Hub description (frontend)
         uses: peter-evans/dockerhub-description@v5
         with:
           username: ${{ secrets.DOCKER_USERNAME }}

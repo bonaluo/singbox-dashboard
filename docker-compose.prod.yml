@@ -1,27 +1,27 @@
-# 生产部署 compose 文件 — 直接拉取预构建镜像，无需本地编译
+# docker-compose.prod.yml — 生产部署叠加文件
 #
-# 启动: docker compose -f docker-compose.prod.yml up -d
+# 用法: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
+# 叠加后服务获得:
+#   - platform 架构限制 (linux/amd64)
+#   - ports 端口映射 (bridge 模式需要)
+#
+# 如果镜像仓库用的是 manifest list 而非独立 tag，
+# 则保持 docker-compose.yml 的默认 tag 即可 (Docker 自动拉取匹配架构)。
+
+# ── 架构 ──────────────────────────────────────────
+x-platform: &platform
+  platform: linux/amd64
+
 services:
   backend:
-    image: bonaluo/singbox-dashboard-backend:latest
-    container_name: singbox-backend
-    network_mode: host
-    volumes:
-      - /mnt/g/docker/singbox-dashboard/data:/data
-    environment:
-      - SINGBOX_CONFIG=/data/sing-box-config.json
-      - CLASH_API=http://127.0.0.1:9090
-      - DASHBOARD_DATA_DIR=/data
-    restart: unless-stopped
+    <<: *platform
+    ports:
+      - "${BACKEND_PORT:-9092}:9092"
+      - "${SINGBOX_MIXED_PORT:-2080}:2080"
+      - "${SINGBOX_CLASH_PORT:-9090}:9090"
 
   frontend:
-    image: bonaluo/singbox-dashboard-frontend:latest
-    container_name: singbox-frontend
-    network_mode: host
-    environment:
-      - HOSTNAME=0.0.0.0
-      - PORT=9000
-    restart: unless-stopped
-    depends_on:
-      - backend
+    <<: *platform
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"

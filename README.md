@@ -45,12 +45,19 @@
 
 ### 部署
 
-```bash
-# 构建并启动（自动生成时间戳 tag + Git commit ID）
-./build.sh
+**方法一：本地开发（Linux/WSL2，host 网络）**
 
-# 仅构建
-./build.sh build
+```bash
+./build.sh              # 构建并启动
+./build.sh backend      # 仅构建启动后端
+./build.sh frontend     # 仅构建启动前端
+```
+
+**方法二：生产 / macOS / Windows（bridge 网络）**
+
+```bash
+cp .env.example .env    # 编辑 .env 中 NETWORK_MODE 等参数
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 ```
 
 ### 访问
@@ -66,7 +73,7 @@ Docker Hub 镜像页面：[bonaluo/singbox-dashboard-backend](https://hub.docker
 
 ### 数据目录
 
-所有持久化数据存储在 `/mnt/g/docker/singbox-dashboard/data/`：
+所有持久化数据存储在 `${DATA_DIR:-./data}`（由 `.env` 配置）：
 
 ```
 data/
@@ -81,11 +88,23 @@ data/
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
+| `TZ` | `Asia/Shanghai` | 容器时区（日志时间戳以此为准） |
 | `SINGBOX_CONFIG` | `/data/sing-box-config.json` | sing-box 配置文件路径 |
 | `SINGBOX_BIN` | `/usr/local/bin/sing-box` | sing-box 可执行文件路径 |
 | `CLASH_API` | `http://127.0.0.1:9090` | Clash REST API 地址 |
 | `DASHBOARD_DATA_DIR` | `/data` | 仪表板数据目录 |
 | `LISTEN_ADDR` | `0.0.0.0:9092` | 后端监听地址 |
+
+### Docker Compose 变量（.env）
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `NETWORK_MODE` | `bridge` | 网络模式（macOS/Windows: bridge；Linux/WSL2: host） |
+| `DATA_DIR` | `./data` | 数据目录 |
+| `FRONTEND_PORT` | `3000` | 前端端口（仅 bridge 模式） |
+| `BACKEND_PORT` | `9092` | 后端 API 端口 |
+| `SINGBOX_MIXED_PORT` | `2080` | 代理端口 |
+| `SINGBOX_CLASH_PORT` | `9090` | Clash API 端口 |
 
 ## API 端点
 

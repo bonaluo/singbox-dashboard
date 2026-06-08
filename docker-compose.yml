@@ -1,11 +1,15 @@
-# singbox-dashboard — base compose (no build section, no network_mode)
+# singbox-dashboard — base compose (no build section)
 # 本地开发:  ./build.sh  (自动检测平台, 构建+启动)
 # 生产部署:  docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
 # 参数:
-#   TAG          — 镜像标签 (默认 latest)
-#   DATA_DIR     — 数据挂载目录
+#   TAG           — 镜像标签 (默认 latest)
+#   DATA_DIR      — 数据挂载目录
+#   NETWORK_MODE  — 网络模式 (bridge/host, 默认 bridge)
 #   FRONTEND_PORT — 前端端口 (仅 bridge 模式)
+#
+# bridge 模式需叠加 docker-compose.prod.yml 暴露端口
+# host 模式直接使用本文件即可 (如: NETWORK_MODE=host docker compose -f docker-compose.yml up -d)
 
 services:
   backend:
@@ -13,6 +17,7 @@ services:
     container_name: singbox-backend
     volumes:
       - ${DATA_DIR:-./data}:/data
+    network_mode: ${NETWORK_MODE:-bridge}
     environment:
       - TZ=Asia/Shanghai
       - SINGBOX_CONFIG=/data/sing-box-config.json
@@ -23,6 +28,7 @@ services:
   frontend:
     image: ${FRONTEND_IMAGE:-bonaluo/singbox-dashboard-frontend}:${TAG:-latest}
     container_name: singbox-frontend
+    network_mode: ${NETWORK_MODE:-bridge}
     environment:
       - HOSTNAME=0.0.0.0
       - PORT=${FRONTEND_PORT:-3000}
