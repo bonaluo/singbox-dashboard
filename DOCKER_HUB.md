@@ -53,6 +53,10 @@ services:
     network_mode: ${NETWORK_MODE:-bridge}
     volumes:
       - ${DATA_DIR:-./data}:/data
+    ports:
+      - "${BACKEND_PORT:-9092}:9092"
+      - "${SINGBOX_MIXED_PORT:-2080}:2080"
+      - "${SINGBOX_CLASH_PORT:-9090}:9090"
     environment:
       - TZ=Asia/Shanghai
       - SINGBOX_CONFIG=/data/sing-box-config.json
@@ -64,6 +68,8 @@ services:
     image: bonaluo/singbox-dashboard-frontend:latest
     container_name: singbox-frontend
     network_mode: ${NETWORK_MODE:-bridge}
+    ports:
+      - "${FRONTEND_PORT:-9000}:9000"
     environment:
       - HOST=0.0.0.0
       - PORT=9000
@@ -72,38 +78,13 @@ services:
       - backend
 ```
 
-> `network_mode: bridge` 是 Docker Compose **默认值**，不写也行。macOS/Windows 必须用 bridge（不支持 host 网络）。
-
 ### 3. 启动
-
-**macOS / Windows（bridge 模式，需要端口映射）：**
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.bridge.yml up -d
-```
-
-`docker-compose.bridge.yml` 提供端口映射，内容如下：
-
-```yaml
-services:
-  backend:
-    ports:
-      - "${BACKEND_PORT:-9092}:9092"
-      - "${SINGBOX_MIXED_PORT:-2080}:2080"
-      - "${SINGBOX_CLASH_PORT:-9090}:9090"
-
-  frontend:
-    ports:
-      - "${FRONTEND_PORT:-9000}:9000"
-```
-
-**Linux / WSL2（host 模式，无需端口映射）：**
 
 ```bash
 docker compose up -d
 ```
 
-> host 模式下 `ports` 映射会被忽略（仅警告无错误）。
+> **网络模式**：默认 `bridge`（所有平台通用）。Linux/WSL2 想用 host 模式可设 `NETWORK_MODE=host`，此时 `ports` 映射被忽略（仅 warning）。
 
 ### 4. 添加订阅
 
@@ -150,7 +131,7 @@ docker compose up -d
 |------|--------|------|
 | `NETWORK_MODE` | `bridge` | 网络模式（macOS/Windows: bridge；Linux/WSL2: host） |
 | `DATA_DIR` | `./data` | 数据目录 |
-| `FRONTEND_PORT` | `9000` | 前端端口（bridge 模式） |
+| `FRONTEND_PORT` | `9000` | 前端端口 |
 | `BACKEND_PORT` | `9092` | 后端 API 端口 |
 | `SINGBOX_MIXED_PORT` | `2080` | 代理端口 |
 | `SINGBOX_CLASH_PORT` | `9090` | Clash API 端口 |
