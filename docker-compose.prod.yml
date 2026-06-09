@@ -1,27 +1,21 @@
-# docker-compose.prod.yml — 生产部署叠加文件
+# singbox-dashboard — 生产部署叠加文件
 #
 # 用法: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
 # 叠加后服务获得:
-#   - platform 架构限制 (linux/amd64)
-#   - ports 端口映射 (bridge 模式需要)
+# - ports 端口映射 (bridge 模式需要)
 #
-# 如果镜像仓库用的是 manifest list 而非独立 tag，
-# 则保持 docker-compose.yml 的默认 tag 即可 (Docker 自动拉取匹配架构)。
-
-# ── 架构 ──────────────────────────────────────────
-x-platform: &platform
-  platform: linux/amd64
+# 架构说明：
+# Docker Hub 镜像使用 manifest list（linux/amd64 + linux/arm64），
+# Docker 会自动根据宿主机架构 pull 匹配的镜像，无需手动指定 platform。
 
 services:
   backend:
-    <<: *platform
     ports:
       - "${BACKEND_PORT:-9092}:9092"
       - "${SINGBOX_MIXED_PORT:-2080}:2080"
       - "${SINGBOX_CLASH_PORT:-9090}:9090"
 
   frontend:
-    <<: *platform
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
