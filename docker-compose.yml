@@ -1,26 +1,26 @@
 # singbox-dashboard — Docker Compose 部署文件
 #
-# 用法: docker compose up -d
+# 用法 (bridge 模式，所有平台通用，推荐):
+#   docker compose up -d
+#
+# 用法 (host 模式，仅 Linux/WSL2):
+#   docker compose -f docker-compose.yml -f docker-compose.host.yml up -d
 #
 # 参数 (.env 或环境变量):
-#   TAG             — 镜像标签 (默认 latest)
-#   DATA_DIR        — 数据挂载目录 (默认 ./data)
-#   NETWORK_MODE    — 网络模式 (默认 bridge；Linux/WSL2 可选 host)
-#   FRONTEND_PORT   — 前端端口映射 (默认 9000)
-#   BACKEND_PORT    — 后端端口映射 (默认 9092)
-#   SINGBOX_MIXED_PORT — 代理端口映射 (默认 2080)
-#   SINGBOX_CLASH_PORT — Clash API 端口映射 (默认 9090)
-#
-# host 模式: NETWORK_MODE=host docker compose up -d
-#   ports 会被忽略（仅 warning），容器端口直接暴露在宿主机上
+#   TAG               — 镜像标签 (默认 latest)
+#   DATA_DIR          — 数据挂载目录 (默认 ./data)
+#   FRONTEND_PORT     — 前端端口 (默认 9000)
+#   BACKEND_PORT      — 后端端口 (默认 9092)
+#   SINGBOX_MIXED_PORT — 代理端口 (默认 2080)
+#   SINGBOX_CLASH_PORT — Clash API 端口 (默认 9090)
 
 services:
   backend:
     image: ${BACKEND_IMAGE:-bonaluo/singbox-dashboard-backend}:${TAG:-latest}
     container_name: singbox-backend
+    network_mode: bridge
     volumes:
       - ${DATA_DIR:-./data}:/data
-    network_mode: ${NETWORK_MODE:-bridge}
     ports:
       - "${BACKEND_PORT:-9092}:9092"
       - "${SINGBOX_MIXED_PORT:-2080}:2080"
@@ -36,7 +36,7 @@ services:
   frontend:
     image: ${FRONTEND_IMAGE:-bonaluo/singbox-dashboard-frontend}:${TAG:-latest}
     container_name: singbox-frontend
-    network_mode: ${NETWORK_MODE:-bridge}
+    network_mode: bridge
     ports:
       - "${FRONTEND_PORT:-9000}:9000"
     environment:

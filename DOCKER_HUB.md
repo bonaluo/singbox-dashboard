@@ -35,7 +35,6 @@ image: docker.m.daocloud.io/bonaluo/singbox-dashboard-backend:latest
 ### 1. 准备 `.env` 文件
 
 ```ini
-NETWORK_MODE=bridge
 DATA_DIR=./data
 FRONTEND_PORT=9000
 BACKEND_PORT=9092
@@ -50,7 +49,7 @@ services:
   backend:
     image: bonaluo/singbox-dashboard-backend:latest
     container_name: singbox-backend
-    network_mode: ${NETWORK_MODE:-bridge}
+    network_mode: bridge
     volumes:
       - ${DATA_DIR:-./data}:/data
     ports:
@@ -68,7 +67,7 @@ services:
   frontend:
     image: bonaluo/singbox-dashboard-frontend:latest
     container_name: singbox-frontend
-    network_mode: ${NETWORK_MODE:-bridge}
+    network_mode: bridge
     ports:
       - "${FRONTEND_PORT:-9000}:9000"
     environment:
@@ -85,7 +84,7 @@ services:
 docker compose up -d
 ```
 
-> **网络模式**：默认 `bridge`（所有平台通用）。Linux/WSL2 想用 host 模式可设 `NETWORK_MODE=host`，此时 `ports` 映射被忽略（仅 warning）。
+> **host 网络模式**（仅 Linux/WSL2）：创建 `docker-compose.host.yml` 叠加文件，仅写入 `network_mode: host`，然后 `docker compose -f docker-compose.yml -f docker-compose.host.yml up -d`。此时 `ports` 映射被忽略（仅 warning），容器端口跟随 `FRONTEND_PORT`/`BACKEND_PORT` 环境变量。
 
 ### 4. 添加订阅
 
@@ -130,7 +129,6 @@ docker compose up -d
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `NETWORK_MODE` | `bridge` | 网络模式（macOS/Windows: bridge；Linux/WSL2: host） |
 | `DATA_DIR` | `./data` | 数据目录 |
 | `FRONTEND_PORT` | `9000` | 前端端口 |
 | `BACKEND_PORT` | `9092` | 后端 API 端口 |

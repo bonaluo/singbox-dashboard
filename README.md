@@ -56,8 +56,9 @@
 **方法二：生产 / macOS / Windows（bridge 网络）**
 
 ```bash
-cp .env.example .env    # 编辑 .env 中 NETWORK_MODE 等参数
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+cp .env.example .env    # 编辑 .env 中端口等参数
+docker compose up -d     # bridge 模式（默认，所有平台通用）
+# host 模式（仅 Linux/WSL2）: docker compose -f docker-compose.yml -f docker-compose.host.yml up -d
 ```
 
 > **注意**：如果 Docker Hub 拉取超时（中国大陆常见），参考 [DOCKER_HUB.md](./DOCKER_HUB.md) 的"镜像拉取加速"章节配置代理或改用 `./build.sh` 源码构建。
@@ -113,9 +114,8 @@ data/
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `NETWORK_MODE` | `bridge` | 网络模式（macOS/Windows: bridge；Linux/WSL2: host） |
 | `DATA_DIR` | `./data` | 数据目录 |
-| `FRONTEND_PORT` | `9000` | 前端端口（仅 bridge 模式） |
+| `FRONTEND_PORT` | `9000` | 前端端口 |
 | `BACKEND_PORT` | `9092` | 后端 API 端口 |
 | `SINGBOX_MIXED_PORT` | `2080` | 代理端口 |
 | `SINGBOX_CLASH_PORT` | `9090` | Clash API 端口 |
