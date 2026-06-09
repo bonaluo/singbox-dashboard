@@ -28,43 +28,29 @@ echo "  GO_IMAGE:     ${GO_IMAGE}"
 echo "  NODE_IMAGE:   ${NODE_IMAGE}"
 echo "=========================================="
 
-# 检测宿主机架构，用于本地 docker build --platform
-detect_platform() {
-  local arch
-  arch="$(uname -m)"
-  case "$arch" in
-    x86_64)  echo "linux/amd64" ;;
-    aarch64) echo "linux/arm64" ;;
-    *)       echo "linux/$(uname -m)" ;;
-  esac
-}
-
-LOCAL_PLATFORM="$(detect_platform)"
-echo "宿主机架构: $(uname -m) → LOCAL_PLATFORM=${LOCAL_PLATFORM}"
-
 # 构建后端
 build_backend() {
- echo "→ 构建 backend..."
- docker build \
- --platform "${LOCAL_PLATFORM}" \
- --build-arg GIT_COMMIT="${GIT_COMMIT}" \
- --build-arg GO_IMAGE="${GO_IMAGE}" \
- --build-arg HTTP_PROXY="${HTTP_PROXY:-}" \
- --build-arg HTTPS_PROXY="${HTTPS_PROXY:-}" \
- -t singbox-backend:"${TAG}" \
- ./backend
+  echo "→ 构建 backend..."
+  docker build \
+    --platform linux/amd64 \
+    --build-arg GIT_COMMIT="${GIT_COMMIT}" \
+    --build-arg GO_IMAGE="${GO_IMAGE}" \
+    --build-arg HTTP_PROXY="${HTTP_PROXY:-}" \
+    --build-arg HTTPS_PROXY="${HTTPS_PROXY:-}" \
+    -t singbox-backend:"${TAG}" \
+    ./backend
 }
 
 # 构建前端
 build_frontend() {
- echo "→ 构建 frontend..."
- docker build \
- --platform "${LOCAL_PLATFORM}" \
- --build-arg GIT_COMMIT="${GIT_COMMIT}" \
- --build-arg NODE_IMAGE="${NODE_IMAGE}" \
- --build-arg NPM_REGISTRY="${NPM_REGISTRY}" \
- -t singbox-frontend:"${TAG}" \
- ./frontend
+  echo "→ 构建 frontend..."
+  docker build \
+    --platform linux/amd64 \
+    --build-arg GIT_COMMIT="${GIT_COMMIT}" \
+    --build-arg NODE_IMAGE="${NODE_IMAGE}" \
+    --build-arg NPM_REGISTRY="${NPM_REGISTRY}" \
+    -t singbox-frontend:"${TAG}" \
+    ./frontend
 }
 
 # 启动 (host 网络, 本地镜像)
