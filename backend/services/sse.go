@@ -110,6 +110,13 @@ func UnsubscribeSSE(c *SSEClient) {
 	}
 }
 
+// ForceBroadcastStatus 立即广播当前状态（切换节点后调用，跳过 3s 轮询等待）
+func ForceBroadcastStatus() {
+	if sseHub != nil {
+		sseHub.forceBroadcastStatus()
+	}
+}
+
 // ── 内部轮询 & 广播 ──
 
 func (h *SSEHub) run() {
@@ -142,6 +149,14 @@ func (h *SSEHub) checkAndBroadcastStatus() {
 		return
 	}
 	h.lastHash["status"] = hash
+	h.broadcast("status", string(data))
+}
+
+// forceBroadcastStatus 跳过 hash 变更检测，立即广播当前状态
+func (h *SSEHub) forceBroadcastStatus() {
+	status := GetStatus()
+	data, _ := json.Marshal(status)
+	h.lastHash["status"] = fmt.Sprintf("%x", sha256.Sum256(data))
 	h.broadcast("status", string(data))
 }
 

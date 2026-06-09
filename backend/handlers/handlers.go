@@ -128,6 +128,7 @@ func handleSwitchProxy(w http.ResponseWriter, r *http.Request) {
 		sendError(w, 500, "切换失败: "+err.Error())
 		return
 	}
+	services.ForceBroadcastStatus() // 立即推送新状态，不等 3s 轮询
 	sendOK(w, map[string]string{"switched": tag})
 }
 
