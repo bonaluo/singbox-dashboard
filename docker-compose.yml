@@ -30,7 +30,8 @@ services:
     container_name: singbox-frontend
     network_mode: ${NETWORK_MODE:-bridge}
     environment:
-      - HOSTNAME=0.0.0.0
+      - HOST=0.0.0.0
+      - PORT=9000
     restart: unless-stopped
     depends_on:
       - backend

@@ -1,0 +1,21 @@
+# docker-compose.bridge.yml — bridge 模式端口映射叠加文件
+#
+# 用法: docker compose -f docker-compose.yml -f docker-compose.bridge.yml up -d
+#
+# 适用场景:
+#   - macOS / Windows Docker Desktop（不支持 host 网络）
+#   - 任何需要端口映射的 bridge 部署
+#
+# 网络模式已在 docker-compose.yml 中通过 NETWORK_MODE 变量控制，
+# 本文件仅补充 bridge 模式需要的端口映射。
+
+services:
+  backend:
+    ports:
+      - "${BACKEND_PORT:-9092}:9092"
+      - "${SINGBOX_MIXED_PORT:-2080}:2080"
+      - "${SINGBOX_CLASH_PORT:-9090}:9090"
+
+  frontend:
+    ports:
+      - "${FRONTEND_PORT:-9000}:9000"

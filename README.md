@@ -115,7 +115,7 @@ data/
 |------|--------|------|
 | `NETWORK_MODE` | `bridge` | 网络模式（macOS/Windows: bridge；Linux/WSL2: host） |
 | `DATA_DIR` | `./data` | 数据目录 |
-| `FRONTEND_PORT` | `3000` | 前端端口（仅 bridge 模式） |
+| `FRONTEND_PORT` | `9000` | 前端端口（仅 bridge 模式） |
 | `BACKEND_PORT` | `9092` | 后端 API 端口 |
 | `SINGBOX_MIXED_PORT` | `2080` | 代理端口 |
 | `SINGBOX_CLASH_PORT` | `9090` | Clash API 端口 |

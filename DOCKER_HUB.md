@@ -35,12 +35,12 @@ image: docker.m.daocloud.io/bonaluo/singbox-dashboard-backend:latest
 ### 1. 准备 `.env` 文件
 
 ```ini
-NETWORK_MODE=bridge          # macOS/Windows 选 bridge，Linux/WSL2 可选 host
-DATA_DIR=./data              # 数据目录
-FRONTEND_PORT=3000           # 前端端口
-BACKEND_PORT=9092            # 后端端口
-SINGBOX_MIXED_PORT=2080      # 代理端口
-SINGBOX_CLASH_PORT=9090      # Clash API 端口
+NETWORK_MODE=bridge
+DATA_DIR=./data
+FRONTEND_PORT=9000
+BACKEND_PORT=9092
+SINGBOX_MIXED_PORT=2080
+SINGBOX_CLASH_PORT=9090
 ```
 
 ### 2. 创建 `docker-compose.yml`
@@ -58,10 +58,6 @@ services:
       - SINGBOX_CONFIG=/data/sing-box-config.json
       - CLASH_API=http://127.0.0.1:9090
       - DASHBOARD_DATA_DIR=/data
-    ports:
-      - "${BACKEND_PORT:-9092}:9092"
-      - "${SINGBOX_MIXED_PORT:-2080}:2080"
-      - "${SINGBOX_CLASH_PORT:-9090}:9090"
     restart: unless-stopped
 
   frontend:
@@ -69,21 +65,45 @@ services:
     container_name: singbox-frontend
     network_mode: ${NETWORK_MODE:-bridge}
     environment:
-      - HOSTNAME=0.0.0.0
-    ports:
-      - "${FRONTEND_PORT:-3000}:3000"
+      - HOST=0.0.0.0
+      - PORT=9000
     restart: unless-stopped
     depends_on:
       - backend
 ```
 
+> `network_mode: bridge` 是 Docker Compose **默认值**，不写也行。macOS/Windows 必须用 bridge（不支持 host 网络）。
+
 ### 3. 启动
+
+**macOS / Windows（bridge 模式，需要端口映射）：**
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.bridge.yml up -d
+```
+
+`docker-compose.bridge.yml` 提供端口映射，内容如下：
+
+```yaml
+services:
+  backend:
+    ports:
+      - "${BACKEND_PORT:-9092}:9092"
+      - "${SINGBOX_MIXED_PORT:-2080}:2080"
+      - "${SINGBOX_CLASH_PORT:-9090}:9090"
+
+  frontend:
+    ports:
+      - "${FRONTEND_PORT:-9000}:9000"
+```
+
+**Linux / WSL2（host 模式，无需端口映射）：**
 
 ```bash
 docker compose up -d
 ```
 
-> **网络模式说明**：macOS/Windows Docker Desktop 必须用 `bridge`（默认）。Linux/WSL2 可以用 `host` 模式（`NETWORK_MODE=host .env` 中设置），此时 `ports` 映射会被忽略（仅警告无错误）。
+> host 模式下 `ports` 映射会被忽略（仅警告无错误）。
 
 ### 4. 添加订阅
 
@@ -123,6 +143,17 @@ docker compose up -d
 | `CLASH_API` | `http://127.0.0.1:9090` | Clash REST API 地址 |
 | `DASHBOARD_DATA_DIR` | `/data` | 数据目录 |
 | `LISTEN_ADDR` | `0.0.0.0:9092` | 后端监听地址 |
+
+## Docker Compose 变量（.env）
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `NETWORK_MODE` | `bridge` | 网络模式（macOS/Windows: bridge；Linux/WSL2: host） |
+| `DATA_DIR` | `./data` | 数据目录 |
+| `FRONTEND_PORT` | `9000` | 前端端口（bridge 模式） |
+| `BACKEND_PORT` | `9092` | 后端 API 端口 |
+| `SINGBOX_MIXED_PORT` | `2080` | 代理端口 |
+| `SINGBOX_CLASH_PORT` | `9090` | Clash API 端口 |
 
 ## 技术栈
 

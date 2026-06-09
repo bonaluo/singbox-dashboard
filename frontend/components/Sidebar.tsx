@@ -9,7 +9,7 @@ function getApiUrl() {
     const stored = localStorage.getItem('apiUrl')
     if (stored) return stored
   }
-  return process.env.NEXT_PUBLIC_API || 'http://10.31.3.87:9092'
+  return process.env.NEXT_PUBLIC_API || 'http://localhost:9092'
 }
 
 const navItems = [

@@ -81,7 +81,7 @@ export default function LogsPage() {
   // SSE 增量推送 — 独立 EventSource，直接追加增量；paused 用 ref 避免重连
   useEffect(() => {
     const base = typeof window !== 'undefined'
-      ? (localStorage.getItem('apiUrl') || process.env.NEXT_PUBLIC_API || 'http://10.31.3.87:9092')
+      ? (localStorage.getItem('apiUrl') || process.env.NEXT_PUBLIC_API || 'http://localhost:9092')
       : ''
     const es = new EventSource(`${base}/api/events?types=logs`)
     es.addEventListener('logs', (e: MessageEvent) => {
