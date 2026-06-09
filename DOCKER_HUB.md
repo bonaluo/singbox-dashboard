@@ -62,6 +62,7 @@ services:
       - SINGBOX_CONFIG=/data/sing-box-config.json
       - CLASH_API=http://127.0.0.1:9090
       - DASHBOARD_DATA_DIR=/data
+      - LISTEN_ADDR=0.0.0.0:${BACKEND_PORT:-9092}
     restart: unless-stopped
 
   frontend:
@@ -72,7 +73,7 @@ services:
       - "${FRONTEND_PORT:-9000}:9000"
     environment:
       - HOST=0.0.0.0
-      - PORT=9000
+      - PORT=${FRONTEND_PORT:-9000}
     restart: unless-stopped
     depends_on:
       - backend
