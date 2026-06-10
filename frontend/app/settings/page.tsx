@@ -54,10 +54,44 @@ export default function SettingsPage() {
   const [configOpen, setConfigOpen] = useState(false)
   const [config, setConfig] = useState<any>(null)
   const [configCollapsed, setConfigCollapsed] = useState<Set<string>>(new Set())
+  const [configCopied, setConfigCopied] = useState(false)
 
   const loadConfig = async () => {
     const r = await api('/api/config')
     if (r.ok) setConfig(r.data)
+  }
+
+  const copyConfig = () => {
+    if (!config) return
+    const text = JSON.stringify(config, null, 2)
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(() => {
+        setConfigCopied(true)
+        setTimeout(() => setConfigCopied(false), 2000)
+      }).catch(() => fallbackCopyConfig(text))
+    } else {
+      fallbackCopyConfig(text)
+    }
+  }
+
+  const fallbackCopyConfig = (text: string) => {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.left = '-9999px'
+    ta.style.top = '-9999px'
+    document.body.appendChild(ta)
+    ta.focus()
+    ta.select()
+    try {
+      document.execCommand('copy')
+      setConfigCopied(true)
+      setTimeout(() => setConfigCopied(false), 2000)
+    } catch {
+      // 静默失败
+    } finally {
+      document.body.removeChild(ta)
+    }
   }
 
   const ConfigTree = ({ data, path = '' }: { data: any; path?: string }) => {
@@ -163,7 +197,17 @@ export default function SettingsPage() {
           className="flex items-center justify-between w-full"
         >
           <h3 className="font-semibold">📄 sing-box 配置</h3>
-          <span className="text-gray-500 text-sm">{configOpen ? '收起' : '展开'}</span>
+          <div className="flex items-center gap-2">
+            {configOpen && config && (
+              <button
+                onClick={e => { e.stopPropagation(); copyConfig() }}
+                className="bg-[var(--accent)] text-white px-2.5 py-1 rounded text-xs hover:opacity-80"
+              >
+                {configCopied ? '已复制 ✓' : '复制'}
+              </button>
+            )}
+            <span className="text-gray-500 text-sm">{configOpen ? '收起' : '展开'}</span>
+          </div>
         </button>
         {configOpen && config && (
           <div className="mt-3 bg-[#0f1419] rounded-lg p-3 text-xs font-mono max-h-[500px] overflow-auto">
