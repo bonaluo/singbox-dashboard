@@ -16,14 +16,6 @@ interface SSEData {
   logs: { content: string }
 }
 
-/**
- * useSSE — 通过 EventSource 订阅服务端事件，替代轮询
- *
- * EventSource 自带自动重连：容器重启后浏览器会在几秒内自动恢复连接。
- *
- * @param types 订阅的事件类型数组，如 ['status', 'connections', 'logs']
- * @returns 各事件类型的最新数据
- */
 export function useSSE(types: string[]): SSEData {
   const [status, setStatus] = useState<any>(null)
   const [connections, setConnections] = useState<any>(null)
@@ -49,18 +41,14 @@ export function useSSE(types: string[]): SSEData {
       } catch {}
     })
 
-    es.onerror = () => {
-      // EventSource 会自动重连，无需手动处理
-    }
+    es.onerror = () => {}
 
     esRef.current = es
   }, [typesKey])
 
   useEffect(() => {
     connect()
-    return () => {
-      esRef.current?.close()
-    }
+    return () => { esRef.current?.close() }
   }, [connect])
 
   return { status, connections, logs }

@@ -7,7 +7,8 @@ set -e
 
 TAG="${TAG:-local}"
 GIT_COMMIT="${GIT_COMMIT:-$(git rev-parse --short HEAD)}"
-export TAG GIT_COMMIT
+VERSION="${VERSION:-$(git describe --tags --abbrev=0 2>/dev/null || echo 'unknown')}"
+export TAG GIT_COMMIT VERSION
 
 # CI 环境用官方源，本地用镜像加速
 if [ "${CI}" = "true" ]; then
@@ -23,6 +24,7 @@ fi
 echo "=========================================="
 echo "  singbox-dashboard 本地构建"
 echo "  TAG:          ${TAG}"
+echo "  VERSION:      ${VERSION}"
 echo "  GIT_COMMIT:   ${GIT_COMMIT}"
 echo "  GO_IMAGE:     ${GO_IMAGE}"
 echo "  NODE_IMAGE:   ${NODE_IMAGE}"
@@ -34,6 +36,7 @@ build_backend() {
   docker build \
     --platform linux/amd64 \
     --build-arg GIT_COMMIT="${GIT_COMMIT}" \
+    --build-arg VERSION="${VERSION}" \
     --build-arg GO_IMAGE="${GO_IMAGE}" \
     --build-arg HTTP_PROXY="${HTTP_PROXY:-}" \
     --build-arg HTTPS_PROXY="${HTTPS_PROXY:-}" \
@@ -112,7 +115,7 @@ case "${SERVICE}" in
 esac
 
 echo ""
-echo "构建完成: ${TAG} (${GIT_COMMIT})"
+echo "构建完成: ${TAG} (${VERSION} ${GIT_COMMIT})"
 echo "Dashboard: http://localhost:9000"
 echo "API:       http://localhost:9092"
 echo "Proxy:     socks5://localhost:2080"

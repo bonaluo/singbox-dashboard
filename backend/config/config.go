@@ -8,6 +8,9 @@ import (
 // GitCommit 由构建时注入（ldflags），运行时获取
 var GitCommit = "unknown"
 
+// Version 由构建时注入（ldflags），运行时获取
+var Version = "unknown"
+
 var (
 	// SingBox paths
 	SingBoxConfig = envOrDefault("SINGBOX_CONFIG", "/home/xfy/sing-box-config.json")
