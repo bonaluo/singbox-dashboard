@@ -11,7 +11,9 @@ GitHub 仓库：[bonaluo/singbox-dashboard](https://github.com/bonaluo/singbox-d
 Docker Hub 可能拉取超时。Docker 启动时添加 `--registry-mirror` 参数即可：
 
 ```bash
-sudo tee -a /etc/docker/daemon.json <<< '"registry-mirrors": ["https://docker.m.daocloud.io"]'
+sudo mkdir -p /etc/docker
+echo '{"registry-mirrors":["https://docker.m.daocloud.io","https://docker.1ms.run"]}' \
+  | sudo tee /etc/docker/daemon.json
 sudo systemctl restart docker
 ```
 
