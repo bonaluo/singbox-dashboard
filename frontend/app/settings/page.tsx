@@ -11,12 +11,14 @@ export default function SettingsPage() {
   const [geoLastUpdated, setGeoLastUpdated] = useState('')
   const [savingGeo, setSavingGeo] = useState(false)
   const [geoMsg, setGeoMsg] = useState('')
+  const [ruleSets, setRuleSets] = useState<{tag: string; size: number; ok: boolean}[]>([])
 
   useEffect(() => {
     api('/api/settings/geo-update').then(r => {
       if (r.ok) {
         setGeoInterval(r.data.interval || 'off')
         setGeoLastUpdated(r.data.last_updated || '')
+        setRuleSets(r.data.rule_sets || [])
       }
     })
   }, [])
@@ -37,6 +39,15 @@ export default function SettingsPage() {
       setGeoInterval(r.data.interval)
       setGeoLastUpdated(r.data.last_updated || '')
       setGeoMsg(geoInterval === 'off' ? '已关闭自动更新' : '已保存，将立即开始更新')
+      // 延迟刷新 rule-set 状态（下载是异步的）
+      if (geoInterval !== 'off') {
+        setTimeout(async () => {
+          const r2 = await api('/api/settings/geo-update')
+          if (r2.ok) setRuleSets(r2.data.rule_sets || [])
+        }, 3000)
+      } else {
+        setRuleSets([])
+      }
     } else {
       setGeoMsg(r.error || '保存失败')
     }
@@ -182,6 +193,21 @@ export default function SettingsPage() {
         </div>
         {geoLastUpdated && (
           <p className="text-xs text-gray-500 mt-2">上次更新: {geoLastUpdated}</p>
+        )}
+        {ruleSets.length > 0 && (
+          <div className="mt-3 space-y-1">
+            {ruleSets.map(rs => (
+              <div key={rs.tag} className="flex items-center gap-2 text-xs">
+                <span className={rs.ok ? 'text-green-400' : 'text-red-400'}>
+                  {rs.ok ? '✓' : '✗'}
+                </span>
+                <span className="text-gray-300 font-mono">{rs.tag}</span>
+                <span className="text-gray-500">
+                  {rs.ok ? `${(rs.size / 1024).toFixed(1)} KB` : '未下载'}
+                </span>
+              </div>
+            ))}
+          </div>
         )}
         {geoMsg && (
           <p className={`text-xs mt-2 ${geoMsg.includes('失败') ? 'text-red-400' : 'text-green-400'}`}>

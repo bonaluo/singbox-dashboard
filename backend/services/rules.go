@@ -3,7 +3,9 @@ package services
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
+	"path/filepath"
 	"singbox-dashboard/config"
 	"singbox-dashboard/models"
 	"strings"
@@ -290,6 +292,7 @@ func ApplyRules() error {
 	}
 
 	// 添加新的 rule_set 定义（当前规则引用但还没有定义的）
+	missingTags := make(map[string]bool)
 	for tag := range ruleSetTags {
 		found := false
 		for _, rs := range ruleSetDefs {
@@ -304,6 +307,12 @@ func ApplyRules() error {
 			tagLower := strings.ToLower(tag)
 			isGeo := strings.HasPrefix(tagLower, "geosite-") || strings.HasPrefix(tagLower, "geoip-")
 			if isGeo {
+				srsPath := filepath.Join(config.DataDir, "ruleset", tag+".srs")
+				if _, err := os.Stat(srsPath); os.IsNotExist(err) {
+					log.Printf("⚠️ 跳过 rule_set %s: .srs 文件不存在 (%s)，请先在设置页开启 Geo 规则集自动更新下载", tag, srsPath)
+					missingTags[tag] = true
+					continue
+				}
 				ruleSetDefs = append(ruleSetDefs, map[string]interface{}{
 					"tag":  tag,
 					"type": "local",
@@ -313,6 +322,28 @@ func ApplyRules() error {
 		}
 	}
 	route["rule_set"] = ruleSetDefs
+
+	// 过滤掉引用了不存在 rule_set 的规则（否则 sing-box 启动 FATAL）
+	if len(missingTags) > 0 {
+		var validRules []map[string]interface{}
+		for _, r := range rules {
+			refs := getRuleSetRefs(r)
+			skip := false
+			for _, ref := range refs {
+				if missingTags[ref] {
+					skip = true
+					break
+				}
+			}
+			if !skip {
+				validRules = append(validRules, r)
+			} else {
+				log.Printf("⚠️ 跳过规则（rule_set .srs 缺失）: %v", refs)
+			}
+		}
+		rules = validRules
+	}
+	route["rules"] = rules
 
 	return WriteSingBoxConfig(cfg)
 }
@@ -326,6 +357,28 @@ func GetOutboundOptions() []string {
 		options = append(options, p.Tag)
 	}
 	return options
+}
+
+// getRuleSetRefs 提取规则中引用的所有 rule_set tag
+func getRuleSetRefs(rule map[string]interface{}) []string {
+	rs, ok := rule["rule_set"]
+	if !ok {
+		return nil
+	}
+	var refs []string
+	switch v := rs.(type) {
+	case string:
+		refs = append(refs, v)
+	case []string:
+		refs = append(refs, v...)
+	case []interface{}:
+		for _, t := range v {
+			if s, ok := t.(string); ok {
+				refs = append(refs, s)
+			}
+		}
+	}
+	return refs
 }
 
 // GetEnrichedOutbounds 返回增强的出站选项列表（含类型、当前节点、延迟）

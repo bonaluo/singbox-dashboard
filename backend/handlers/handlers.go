@@ -487,7 +487,12 @@ func handleGroupMembers(w http.ResponseWriter, r *http.Request) {
 
 func handleGetGeoUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	cfg := services.LoadGeoUpdateConfig()
-	sendOK(w, cfg)
+	statuses := services.GetRuleSetStatuses()
+	sendOK(w, map[string]interface{}{
+		"interval":     cfg.Interval,
+		"last_updated": cfg.LastUpdated,
+		"rule_sets":    statuses,
+	})
 }
 
 func handleSetGeoUpdateConfig(w http.ResponseWriter, r *http.Request) {

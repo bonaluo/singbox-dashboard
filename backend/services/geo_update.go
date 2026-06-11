@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"singbox-dashboard/config"
@@ -17,6 +18,29 @@ import (
 type GeoUpdateConfig struct {
 	Interval    string `json:"interval"`              // "off" / "1d" / "7d" / "30d"
 	LastUpdated string `json:"last_updated,omitempty"` // ISO 时间戳
+}
+
+// RuleSetStatus 单个规则集文件状态
+type RuleSetStatus struct {
+	Tag  string `json:"tag"`
+	Size int64  `json:"size"`  // 文件大小（字节），-1 表示不存在
+	OK   bool   `json:"ok"`    // 文件存在且大于 0
+}
+
+// GetRuleSetStatuses 返回所有 geo rule-set 文件的状态
+func GetRuleSetStatuses() []RuleSetStatus {
+	tags := []string{"geoip-cn", "geosite-cn"}
+	var result []RuleSetStatus
+	for _, tag := range tags {
+		path := filepath.Join(config.DataDir, "ruleset", tag+".srs")
+		info, err := os.Stat(path)
+		if err != nil {
+			result = append(result, RuleSetStatus{Tag: tag, Size: -1, OK: false})
+		} else {
+			result = append(result, RuleSetStatus{Tag: tag, Size: info.Size(), OK: info.Size() > 0})
+		}
+	}
+	return result
 }
 
 func geoUpdateConfigPath() string {
@@ -45,6 +69,7 @@ func LoadGeoUpdateConfig() GeoUpdateConfig {
 }
 
 // DownloadGeoRuleSets 下载 geoip/geosite 规则集文件到本地
+// 优先走内部代理（sing-box mixed-in 端口 2080），代理不可用时直连
 // 多镜像回退，下载失败时不阻塞（保留旧文件）
 func DownloadGeoRuleSets() error {
 	entries := []struct {
@@ -54,6 +79,14 @@ func DownloadGeoRuleSets() error {
 		{"geoip-cn", "SagerNet/sing-geoip"},
 		{"geosite-cn", "SagerNet/sing-geosite"},
 	}
+
+	// 尝试通过内部代理下载（sing-box mixed-in 支持 HTTP 代理）
+	proxyURL, _ := url.Parse("http://127.0.0.1:2080")
+	proxyTransport := &http.Transport{Proxy: http.ProxyURL(proxyURL)}
+	proxyClient := &http.Client{Transport: proxyTransport, Timeout: 60 * time.Second}
+
+	// 回退直连客户端
+	directClient := &http.Client{Timeout: 30 * time.Second}
 
 	for _, e := range entries {
 		filename := e.Tag + ".srs"
@@ -67,7 +100,12 @@ func DownloadGeoRuleSets() error {
 
 		var lastErr error
 		for _, u := range urls {
-			resp, err := http.Get(u)
+			// 先走代理
+			resp, err := proxyClient.Get(u)
+			if err != nil {
+				// 代理不可用，回退直连
+				resp, err = directClient.Get(u)
+			}
 			if err != nil {
 				lastErr = fmt.Errorf("%s: %w", u, err)
 				continue
