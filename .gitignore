@@ -1,6 +1,8 @@
 backend/singbox-dashboard
+.next/
 frontend/.next/
 frontend/node_modules/
+data/
 *.exe
 *.test
 .env
