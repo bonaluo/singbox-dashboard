@@ -1,8 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { api } from '@/components/Sidebar'
-import { notifySidebar } from '@/components/SidebarStatus'
+import { api, notifySidebar } from '@/components/SidebarStatus'
 
 export default function ProxiesPage() {
   const [proxies, setProxies] = useState<any[]>([])

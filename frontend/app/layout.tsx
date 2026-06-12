@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import SidebarShell from '@/components/SidebarShell'
 import SidebarStatus from '@/components/SidebarStatus'
+import TwemojiLoader from '@/components/TwemojiLoader'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -14,6 +15,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="antialiased">
         <SidebarShell>{children}</SidebarShell>
         <SidebarStatus />
+        <TwemojiLoader />
       </body>
     </html>
   )
