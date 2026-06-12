@@ -102,6 +102,8 @@ export default function RulesPage() {
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [dragIndex, setDragIndex] = useState<number | null>(null)
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
 
   // 表单: 简单模式 (单条件 type+value) 或 高级模式 (多条件 conditions)
   const [formType, setFormType] = useState('domain_suffix')
@@ -185,6 +187,35 @@ export default function RulesPage() {
 
   const deleteRule = async (id: string) => {
     await api(`/api/rules/${id}`, { method: 'DELETE' })
+    loadRules()
+  }
+
+  const handleDragStart = (index: number) => {
+    setDragIndex(index)
+  }
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault()
+    setDragOverIndex(index)
+  }
+
+  const handleDragEnd = () => {
+    setDragIndex(null)
+    setDragOverIndex(null)
+  }
+
+  const handleDrop = async (index: number) => {
+    if (dragIndex === null || dragIndex === index) return
+    const reordered = [...rules]
+    const [moved] = reordered.splice(dragIndex, 1)
+    reordered.splice(index, 0, moved)
+    setRules(reordered)
+    setDragIndex(null)
+    setDragOverIndex(null)
+    await api('/api/rules/reorder', {
+      method: 'PUT',
+      body: JSON.stringify({ ids: reordered.map((r: any) => r.id) }),
+    })
     loadRules()
   }
 
@@ -405,13 +436,28 @@ export default function RulesPage() {
             ? 'bg-blue-500/20 text-blue-400'
             : 'bg-[var(--accent)]/20 text-[var(--accent)]'
 
+          const isDragging = dragIndex === i
+          const isDragOver = dragOverIndex === i && dragIndex !== i
+
           return (
             <div
               key={rule.id}
-              className={`flex items-center gap-2 bg-[var(--surface)] rounded-xl p-3 border border-[var(--border)] ${
+              draggable
+              onDragStart={() => handleDragStart(i)}
+              onDragOver={(e) => handleDragOver(e, i)}
+              onDragEnd={handleDragEnd}
+              onDrop={() => handleDrop(i)}
+              className={`flex items-center gap-2 bg-[var(--surface)] rounded-xl p-3 border transition-all ${
+                isDragging ? 'opacity-40 scale-95' : ''
+              } ${isDragOver ? 'border-[var(--accent)] bg-[var(--accent)]/5' : 'border-[var(--border)]'} ${
                 !rule.enabled ? 'opacity-50' : ''
               }`}
             >
+              {/* 拖拽手柄 */}
+              <span className="text-gray-600 cursor-grab active:cursor-grabbing text-xs shrink-0 select-none" title="拖拽排序">
+                ⋮⋮
+              </span>
+
               <span className="text-xs text-gray-500 w-5 text-right">{i + 1}</span>
 
               {/* 排序按钮 */}
