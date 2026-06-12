@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import SidebarStatus, { api, notifySidebar } from '@/components/SidebarStatus'
+import { api } from '@/components/Sidebar'
+import { notifySidebar } from '@/components/SidebarStatus'
 
 export default function ProxiesPage() {
   const [proxies, setProxies] = useState<any[]>([])
@@ -46,9 +47,7 @@ export default function ProxiesPage() {
   })
 
   return (
-    <>
-      <SidebarStatus />
-      <div className="max-w-2xl">
+    <div className="max-w-2xl">
         <h2 className="text-xl font-bold mb-4">🔗 节点列表 ({proxies.length})</h2>
         {sortedRegions.map(region => {
           const nodes = grouped[region].sort((a: any, b: any) => a.tag.localeCompare(b.tag))
@@ -79,6 +78,5 @@ export default function ProxiesPage() {
           )
         })}
       </div>
-    </>
   )
 }

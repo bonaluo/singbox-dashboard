@@ -79,7 +79,8 @@ start() {
   docker run -d \
     --name singbox-frontend \
     --network host \
-    -e HOST=0.0.0.0 \
+    --hostname localhost \
+    -e HOSTNAME=0.0.0.0 \
     -e PORT=9000 \
     -e NEXT_PUBLIC_GIT_COMMIT="${GIT_COMMIT}" \
     --restart unless-stopped \

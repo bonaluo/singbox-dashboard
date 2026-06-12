@@ -22,7 +22,7 @@ export default function SidebarShell({ children }: { children: React.ReactNode }
       <aside className="w-56 flex flex-col border-r border-[var(--border)] bg-[var(--surface)]">
         <div className="p-4 border-b border-[var(--border)]">
           <h1 className="text-lg font-bold">sing-box</h1>
-          {/* Portal 插槽：由 page 组件注入状态内容 */}
+          {/* Portal 插槽：运行状态指示灯 */}
           <div id="sidebar-status-slot" />
         </div>
 
@@ -43,8 +43,11 @@ export default function SidebarShell({ children }: { children: React.ReactNode }
           ))}
         </nav>
 
-        {/* 另一个 Portal 插槽：底部版本号 */}
-        <div id="sidebar-version-slot" className="p-2 border-t border-[var(--border)] text-[10px] text-gray-600 text-center" />
+        {/* 底部区域：状态信息 + 版本号 */}
+        <div className="border-t border-[var(--border)]">
+          <div id="sidebar-status-info-slot" className="px-3 pt-2 text-xs text-gray-400" />
+          <div id="sidebar-version-slot" className="px-3 pb-2 text-[10px] text-gray-600 text-center" />
+        </div>
       </aside>
 
       <main className="flex-1 overflow-auto p-6">

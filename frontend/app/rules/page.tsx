@@ -150,12 +150,12 @@ export default function RulesPage() {
     if (editingId) {
       await api(`/api/rules/${editingId}`, {
         method: 'PUT',
-        body: JSON.stringify({ ...body, id: editingId, priority: 0 }),
+        body: JSON.stringify({ ...body, id: editingId }),
       })
     } else {
       await api('/api/rules', {
         method: 'POST',
-        body: JSON.stringify({ ...body, priority: rules.length + 1 }),
+        body: JSON.stringify(body),
       })
     }
 
@@ -185,6 +185,23 @@ export default function RulesPage() {
 
   const deleteRule = async (id: string) => {
     await api(`/api/rules/${id}`, { method: 'DELETE' })
+    loadRules()
+  }
+
+  const moveRule = async (index: number, direction: 'up' | 'down') => {
+    const newIndex = direction === 'up' ? index - 1 : index + 1
+    if (newIndex < 0 || newIndex >= rules.length) return
+    const reordered = [...rules]
+    const temp = reordered[index]
+    reordered[index] = reordered[newIndex]
+    reordered[newIndex] = temp
+    // 乐观更新本地状态
+    setRules(reordered)
+    // 发送新顺序到后端
+    await api('/api/rules/reorder', {
+      method: 'PUT',
+      body: JSON.stringify({ ids: reordered.map((r: any) => r.id) }),
+    })
     loadRules()
   }
 
@@ -396,6 +413,26 @@ export default function RulesPage() {
               }`}
             >
               <span className="text-xs text-gray-500 w-5 text-right">{i + 1}</span>
+
+              {/* 排序按钮 */}
+              <div className="flex flex-col shrink-0 gap-px">
+                <button
+                  onClick={() => moveRule(i, 'up')}
+                  disabled={i === 0}
+                  className="text-gray-500 hover:text-gray-300 disabled:opacity-20 disabled:cursor-default transition-colors leading-none text-xs"
+                  title="上移"
+                >
+                  ▲
+                </button>
+                <button
+                  onClick={() => moveRule(i, 'down')}
+                  disabled={i === rules.length - 1}
+                  className="text-gray-500 hover:text-gray-300 disabled:opacity-20 disabled:cursor-default transition-colors leading-none text-xs"
+                  title="下移"
+                >
+                  ▼
+                </button>
+              </div>
 
               {/* 启用开关 */}
               <button

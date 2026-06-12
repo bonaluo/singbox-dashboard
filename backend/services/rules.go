@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"singbox-dashboard/config"
 	"singbox-dashboard/models"
+	"sort"
 	"strings"
 	"time"
 )
@@ -36,10 +37,13 @@ func LoadRules() (*models.RuleStore, error) {
 
 func SaveRules(store *models.RuleStore) error {
 	os.MkdirAll(config.DataDir, 0755)
-	// 按 priority 排序
-	sorted := make([]models.Rule, len(store.Rules))
-	copy(sorted, store.Rules)
-	store.Rules = sorted
+	// 按 priority 排序（priority 越小越靠前；相同 priority 按 ID 字典序）
+	sort.SliceStable(store.Rules, func(i, j int) bool {
+		if store.Rules[i].Priority != store.Rules[j].Priority {
+			return store.Rules[i].Priority < store.Rules[j].Priority
+		}
+		return store.Rules[i].ID < store.Rules[j].ID
+	})
 	data, err := json.MarshalIndent(store, "", "  ")
 	if err != nil {
 		return err
@@ -53,6 +57,16 @@ func AddRule(r *models.Rule) (*models.Rule, error) {
 		return nil, err
 	}
 	r.ID = fmt.Sprintf("rule_%d", time.Now().UnixMilli())
+	// 自动分配 priority：已有最大 priority + 1
+	if r.Priority <= 0 {
+		maxP := 0
+		for _, rule := range store.Rules {
+			if rule.Priority > maxP {
+				maxP = rule.Priority
+			}
+		}
+		r.Priority = maxP + 1
+	}
 	store.Rules = append(store.Rules, *r)
 	if err := SaveRules(store); err != nil {
 		return nil, err
@@ -69,6 +83,10 @@ func UpdateRule(r *models.Rule) error {
 	}
 	for i := range store.Rules {
 		if store.Rules[i].ID == r.ID {
+			// 保留原有 priority（如果请求未提供）
+			if r.Priority <= 0 {
+				r.Priority = store.Rules[i].Priority
+			}
 			store.Rules[i] = *r
 		}
 	}
@@ -95,6 +113,31 @@ func DeleteRule(id string) error {
 		return fmt.Errorf("rule not found")
 	}
 	store.Rules = newRules
+	if err := SaveRules(store); err != nil {
+		return err
+	}
+	go ApplyRules()
+	return nil
+}
+
+// ReorderRules 按给定的 ID 顺序重排规则优先级
+// ids 的顺序即目标顺序，priority 从 1 开始递增
+func ReorderRules(ids []string) error {
+	store, err := LoadRules()
+	if err != nil {
+		return err
+	}
+	// 构建 ID → Rule 的索引
+	index := make(map[string]*models.Rule)
+	for i := range store.Rules {
+		index[store.Rules[i].ID] = &store.Rules[i]
+	}
+	// 按 ids 顺序重新分配 priority
+	for i, id := range ids {
+		if r, ok := index[id]; ok {
+			r.Priority = i + 1
+		}
+	}
 	if err := SaveRules(store); err != nil {
 		return err
 	}

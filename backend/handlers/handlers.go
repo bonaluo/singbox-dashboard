@@ -40,6 +40,7 @@ func Register(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/rules/{id}", handleDeleteRule)
 	mux.HandleFunc("POST /api/rules/apply", handleApplyRules)
 	mux.HandleFunc("GET /api/rules/options", handleRuleOptions)
+	mux.HandleFunc("PUT /api/rules/reorder", handleReorderRules)
 
 	// ── 出站组 ──
 	mux.HandleFunc("GET /api/groups", handleListGroups)
@@ -327,6 +328,25 @@ func handleApplyRules(w http.ResponseWriter, r *http.Request) {
 	// 重启服务使规则生效
 	_ = services.RestartService()
 	sendOK(w, map[string]string{"msg": "规则已应用并重启服务"})
+}
+
+func handleReorderRules(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		IDs []string `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sendError(w, 400, "invalid JSON")
+		return
+	}
+	if len(body.IDs) == 0 {
+		sendError(w, 400, "ids required")
+		return
+	}
+	if err := services.ReorderRules(body.IDs); err != nil {
+		sendError(w, 500, err.Error())
+		return
+	}
+	sendOK(w, map[string]string{"msg": "排序已更新"})
 }
 
 func handleRuleOptions(w http.ResponseWriter, r *http.Request) {

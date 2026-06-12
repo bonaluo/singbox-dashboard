@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import SidebarShell from '@/components/SidebarShell'
-import Script from 'next/script'
+import SidebarStatus from '@/components/SidebarStatus'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -13,7 +13,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="zh-CN" suppressHydrationWarning>
       <body className="antialiased">
         <SidebarShell>{children}</SidebarShell>
-        <Script id="twemoji-loader" src="/twemoji-init.js" strategy="afterInteractive" />
+        <SidebarStatus />
       </body>
     </html>
   )
