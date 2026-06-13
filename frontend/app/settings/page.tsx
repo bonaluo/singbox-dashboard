@@ -12,6 +12,9 @@ export default function SettingsPage() {
   const [savingGeo, setSavingGeo] = useState(false)
   const [geoMsg, setGeoMsg] = useState('')
   const [ruleSets, setRuleSets] = useState<{tag: string; size: number; ok: boolean}[]>([])
+  const [exporting, setExporting] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [backupMsg, setBackupMsg] = useState('')
 
   useEffect(() => {
     api('/api/settings/geo-update').then(r => {
@@ -52,6 +55,64 @@ export default function SettingsPage() {
       setGeoMsg(r.error || '保存失败')
     }
     setSavingGeo(false)
+  }
+
+  const handleExport = async () => {
+    setExporting(true)
+    setBackupMsg('')
+    try {
+      const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl
+      const resp = await fetch(`${baseUrl}/api/backup/export`)
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ error: '导出失败' }))
+        setBackupMsg('导出失败: ' + (err.error || resp.statusText))
+        return
+      }
+      const blob = await resp.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      // 从 Content-Disposition 解析文件名
+      const disposition = resp.headers.get('Content-Disposition') || ''
+      const match = disposition.match(/filename="?(.+?)"?$/)
+      a.download = match ? match[1] : 'singbox-backup.json'
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      setBackupMsg('备份已下载')
+    } catch (e: any) {
+      setBackupMsg('导出失败: ' + (e.message || '网络错误'))
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setImporting(true)
+    setBackupMsg('')
+    try {
+      const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl
+      const resp = await fetch(`${baseUrl}/api/backup/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: await file.text(),
+      })
+      const result = await resp.json()
+      if (result.ok) {
+        setBackupMsg(result.data.msg + ' — ' + result.data.summary)
+      } else {
+        setBackupMsg('导入失败: ' + (result.error || '未知错误'))
+      }
+    } catch (e: any) {
+      setBackupMsg('导入失败: ' + (e.message || '网络错误'))
+    } finally {
+      setImporting(false)
+      // 清除文件选择，允许重复选择同一文件
+      e.target.value = ''
+    }
   }
 
   const intervalLabels: Record<string, string> = {
@@ -212,6 +273,32 @@ export default function SettingsPage() {
         {geoMsg && (
           <p className={`text-xs mt-2 ${geoMsg.includes('失败') ? 'text-red-400' : 'text-green-400'}`}>
             {geoMsg}
+          </p>
+        )}
+      </div>
+
+      {/* ── 备份与还原 ── */}
+      <div className="bg-[var(--surface)] rounded-xl p-4 mt-4 border border-[var(--border)]">
+        <h3 className="font-semibold mb-2">💾 备份与还原</h3>
+        <p className="text-xs text-gray-500 mb-3">
+          导出所有配置（订阅、规则、分组规则、sing-box 配置等）到备份文件，或从备份文件还原。
+        </p>
+        <div className="flex gap-2 items-center flex-wrap">
+          <button onClick={handleExport}
+            disabled={exporting}
+            className="bg-[var(--accent)] text-white px-4 py-2 rounded-lg text-sm hover:opacity-90 disabled:opacity-50">
+            {exporting ? '导出中...' : '📥 导出备份'}
+          </button>
+          <label className="bg-[#0f1419] border border-[var(--border)] text-[var(--foreground)] px-4 py-2 rounded-lg text-sm cursor-pointer hover:border-[var(--accent)] transition-colors">
+            {importing ? '导入中...' : '📤 导入备份'}
+            <input type="file" accept=".json" onChange={handleImport}
+              disabled={importing}
+              className="hidden" />
+          </label>
+        </div>
+        {backupMsg && (
+          <p className={`text-xs mt-2 ${backupMsg.includes('失败') ? 'text-red-400' : 'text-green-400'}`}>
+            {backupMsg}
           </p>
         )}
       </div>

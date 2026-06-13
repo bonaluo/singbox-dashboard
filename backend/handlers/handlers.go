@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"singbox-dashboard/models"
@@ -68,6 +69,10 @@ func Register(mux *http.ServeMux) {
 
 	// ── 连接 ──
 	mux.HandleFunc("GET /api/connections", handleConnections)
+
+	// ── 备份 ──
+	mux.HandleFunc("GET /api/backup/export", handleBackupExport)
+	mux.HandleFunc("POST /api/backup/import", handleBackupImport)
 
 	log.Println("[handlers] routes registered")
 }
@@ -591,4 +596,54 @@ func handleApplyGroupRules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sendOK(w, map[string]string{"msg": "分组规则已应用"})
+}
+
+// ── 备份导出/导入 ──
+
+func handleBackupExport(w http.ResponseWriter, r *http.Request) {
+	backup, err := services.ExportBackup()
+	if err != nil {
+		sendError(w, 500, "导出备份失败: "+err.Error())
+		return
+	}
+
+	data, err := json.MarshalIndent(backup, "", "  ")
+	if err != nil {
+		sendError(w, 500, "序列化备份失败: "+err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="singbox-backup-%s.json"`,
+		time.Now().Format("20060102-150405")))
+	corsHeaders(w)
+	w.WriteHeader(200)
+	w.Write(data)
+}
+
+func handleBackupImport(w http.ResponseWriter, r *http.Request) {
+	// 限制上传大小 10MB
+	r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
+
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		sendError(w, 400, "读取上传文件失败: "+err.Error())
+		return
+	}
+
+	if len(data) == 0 {
+		sendError(w, 400, "上传文件为空")
+		return
+	}
+
+	summary, err := services.ImportBackup(data)
+	if err != nil {
+		sendError(w, 400, "导入备份失败: "+err.Error())
+		return
+	}
+
+	sendOK(w, map[string]string{
+		"msg":     "备份导入成功",
+		"summary": "已恢复: " + summary,
+	})
 }
