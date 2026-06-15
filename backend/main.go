@@ -14,6 +14,11 @@ func main() {
 	// 确保数据目录存在
 	os.MkdirAll(config.DataDir, 0755)
 
+	// 启动前先 rotate 日志（如果超过 20MB）
+	if err := services.RotateLogIfNeeded(); err != nil {
+		log.Printf("[main] 日志 rotate 警告: %v", err)
+	}
+
 	// 仅当配置文件存在时才启动 sing-box
 	if _, err := os.Stat(config.SingBoxConfig); err == nil {
 		log.Println("启动 sing-box ...")

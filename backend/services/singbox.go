@@ -1,10 +1,10 @@
 package services
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"singbox-dashboard/config"
@@ -684,7 +684,59 @@ func copyFile(src, dst string) error {
 
 // ── 日志读取 ──
 
-// GetLogs 从日志文件读取最后 lines 行（0 或负数则读取全部），同时返回日志文件路径
+const (
+	// maxLogSize 日志文件大小阈值（20MB），超过则触发 rotate
+	maxLogSize = 20 * 1024 * 1024
+	// maxLogBackups 保留的归档数量
+	maxLogBackups = 5
+	// tailBufSize 从文件末尾读取时用的缓冲区大小
+	tailBufSize = 8192
+)
+
+// RotateLogIfNeeded 如果日志文件超过 maxLogSize，将其 rotate：
+// sing-box.log → sing-box.log.1, .1 → .2, ... 最多保留 maxLogBackups 个归档。
+// 应在 sing-box 启动前调用，确保 sing-box 打开的是新文件。
+func RotateLogIfNeeded() error {
+	logPath := config.LogPath()
+	info, err := os.Stat(logPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if info.Size() < maxLogSize {
+		return nil
+	}
+
+	log.Printf("[rotate] 日志文件 %s 大小 %dMB 超过阈值，开始 rotate", logPath, info.Size()/(1024*1024))
+
+	// 删除最旧的归档
+	oldest := fmt.Sprintf("%s.%d", logPath, maxLogBackups)
+	if err := os.Remove(oldest); err != nil && !os.IsNotExist(err) {
+		log.Printf("[rotate] 删除最旧归档失败: %v", err)
+	}
+
+	// 向下滚动：.4 → .5, .3 → .4, .2 → .3, .1 → .2
+	for i := maxLogBackups - 1; i >= 1; i-- {
+		old := fmt.Sprintf("%s.%d", logPath, i)
+		new_ := fmt.Sprintf("%s.%d", logPath, i+1)
+		if err := os.Rename(old, new_); err != nil && !os.IsNotExist(err) {
+			log.Printf("[rotate] 滚动 %s → %s 失败: %v", old, new_, err)
+		}
+	}
+
+	// 将当前文件重命名为 .1
+	if err := os.Rename(logPath, logPath+".1"); err != nil {
+		return fmt.Errorf("rotate 重命名失败: %w", err)
+	}
+
+	log.Printf("[rotate] 完成，当前日志文件已清空")
+	return nil
+}
+
+// GetLogs 从日志文件读取最后 lines 行（0 或负数则读取全部），同时返回日志文件路径。
+// 当 lines > 0 时使用 os.File.Seek 从文件末尾倒着读，避免将整个文件加载到内存。
 func GetLogs(lines int) (string, string, error) {
 	logPath := config.LogPath()
 	f, err := os.Open(logPath)
@@ -696,17 +748,71 @@ func GetLogs(lines int) (string, string, error) {
 	}
 	defer f.Close()
 
-	var allLines []string
-	scanner := bufio.NewScanner(f)
-	// 增大 buffer 以处理长日志行
-	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
-	for scanner.Scan() {
-		allLines = append(allLines, scanner.Text())
+	info, err := f.Stat()
+	if err != nil {
+		return "", logPath, err
 	}
 
-	if lines > 0 && len(allLines) > lines {
-		allLines = allLines[len(allLines)-lines:]
+	fileSize := info.Size()
+	if fileSize == 0 {
+		return "", logPath, nil
 	}
 
-	return strings.Join(allLines, "\n"), logPath, nil
+	// 不限制行数：读取全部（向后兼容旧行为）
+	if lines <= 0 {
+		data, err := io.ReadAll(f)
+		if err != nil {
+			return "", logPath, err
+		}
+		return string(data), logPath, nil
+	}
+
+	// Tail 模式：从文件末尾倒着读，只提取最后 N 行
+	content, err := tailLines(f, fileSize, lines)
+	if err != nil {
+		return "", logPath, err
+	}
+	return content, logPath, nil
+}
+
+// tailLines 从文件末尾倒着读，返回最后 lines 行。
+// 使用 os.File.Seek 定位，只读取文件尾部附近的数据，不会把整个文件读入内存。
+func tailLines(f *os.File, fileSize int64, lines int) (string, error) {
+	buf := make([]byte, tailBufSize)
+	var result []byte
+	newlineCount := 0
+	pos := fileSize
+
+	for pos > 0 && newlineCount <= lines {
+		readSize := int64(tailBufSize)
+		if pos < readSize {
+			readSize = pos
+		}
+		pos -= readSize
+
+		if _, err := f.Seek(pos, io.SeekStart); err != nil {
+			return "", err
+		}
+		n, err := io.ReadFull(f, buf[:readSize])
+		if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+			return "", err
+		}
+		chunk := buf[:n]
+
+		// 从 chunk 末尾向前扫描，数换行符
+		for i := len(chunk) - 1; i >= 0; i-- {
+			if chunk[i] == '\n' {
+				newlineCount++
+				if newlineCount > lines {
+					// 找到了足够的行：从该换行符之后开始
+					result = append(chunk[i+1:], result...)
+					return string(result), nil
+				}
+			}
+		}
+		// 还没找够行数，把整个 chunk 追加到结果前面
+		result = append(chunk, result...)
+	}
+
+	return string(result), nil
 }
