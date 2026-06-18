@@ -1,0 +1,54 @@
+# docker-compose.dev.yml — 本地开发构建（bridge 网络，独立运行）
+#
+# 用法（无需叠加）：
+#   docker compose -f docker-compose.dev.yml up -d --build
+#
+# 特性：
+#   - 本地构建镜像（不拉取云端）
+#   - bridge 网络（所有平台通用）
+#   - 独立运行，无需叠加 docker-compose.yml
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        GO_IMAGE: ${GO_IMAGE:-docker.m.daocloud.io/library/golang:1.25-alpine}
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+        VERSION: ${VERSION:-unknown}
+    image: ${BACKEND_IMAGE:-singbox-dashboard-backend}:${TAG:-local}
+    container_name: singbox-backend
+    network_mode: bridge
+    volumes:
+      - ${DATA_DIR:-./data}:/data
+    ports:
+      - "${BACKEND_PORT:-9092}:9092"
+      - "${SINGBOX_MIXED_PORT:-2080}:2080"
+      - "${SINGBOX_CLASH_PORT:-9090}:9090"
+    environment:
+      - TZ=Asia/Shanghai
+      - SINGBOX_CONFIG=/data/sing-box-config.json
+      - CLASH_API=http://127.0.0.1:9090
+      - DASHBOARD_DATA_DIR=/data
+      - LISTEN_ADDR=0.0.0.0:${BACKEND_PORT:-9092}
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-docker.m.daocloud.io/library/node:22-alpine}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
+    image: ${FRONTEND_IMAGE:-singbox-dashboard-frontend}:${TAG:-local}
+    container_name: singbox-frontend
+    network_mode: bridge
+    ports:
+      - "${FRONTEND_PORT:-9000}:9000"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=${FRONTEND_PORT:-9000}
+    restart: unless-stopped
+    depends_on:
+      - backend
