@@ -154,6 +154,9 @@ func StartGeoUpdateLoop() {
 	go func() {
 		// 启动时先检查是否需要立即更新
 		cfg := LoadGeoUpdateConfig()
+		// 检测占位 .srs 文件：ApplyRules 启动时若文件缺失会生成 17 字节的空占位
+		// 占位文件过小时无论 interval 设置如何都强制下载一次
+		hasPlaceholder := hasPlaceholderRuleSet()
 		if cfg.Interval != "off" {
 			shouldUpdate := false
 			if cfg.LastUpdated == "" {
@@ -164,12 +167,24 @@ func StartGeoUpdateLoop() {
 					shouldUpdate = true
 				}
 			}
-			if shouldUpdate {
-				log.Println("🔄 geo 规则集需要更新，开始下载...")
+			if shouldUpdate || hasPlaceholder {
+				if hasPlaceholder {
+					log.Println("🔄 检测到 .srs 占位文件，强制下载真实规则集...")
+				} else {
+					log.Println("🔄 geo 规则集需要更新，开始下载...")
+				}
 				if err := DownloadGeoRuleSets(); err == nil {
 					cfg.LastUpdated = time.Now().Format(time.RFC3339)
 					SaveGeoUpdateConfig(cfg)
 				}
+			}
+		} else if hasPlaceholder {
+			// interval 为 off 但检测到占位文件：仍然强制下载一次，
+			// 避免新环境永远停留在占位文件
+			log.Println("🔄 检测到 .srs 占位文件，强制下载真实规则集（interval=off）...")
+			if err := DownloadGeoRuleSets(); err == nil {
+				cfg.LastUpdated = time.Now().Format(time.RFC3339)
+				SaveGeoUpdateConfig(cfg)
 			}
 		}
 
@@ -201,4 +216,25 @@ func StartGeoUpdateLoop() {
 			}
 		}
 	}()
+}
+
+// placeholderMaxSize 占位 .srs 文件的最大字节数
+// ApplyRules 启动时若 .srs 缺失会调用 sing-box rule-set compile 生成
+// 17 字节的空 rule-set，1KB 阈值足以区分占位与真实规则集
+const placeholderMaxSize = 1024
+
+// hasPlaceholderRuleSet 检查 data/ruleset/ 下是否存在占位 .srs 文件
+// 真实规则集通常 30KB+，占位文件 < 1KB
+func hasPlaceholderRuleSet() bool {
+	for _, tag := range []string{"geoip-cn", "geosite-cn"} {
+		path := filepath.Join(config.DataDir, "ruleset", tag+".srs")
+		info, err := os.Stat(path)
+		if err != nil {
+			return true // 文件不存在也算需要下载
+		}
+		if info.Size() < placeholderMaxSize {
+			return true
+		}
+	}
+	return false
 }
