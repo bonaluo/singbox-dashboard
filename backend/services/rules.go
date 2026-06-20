@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"singbox-dashboard/config"
 	"singbox-dashboard/models"
@@ -309,6 +310,7 @@ func ApplyRules() error {
 	}
 
 	// 重建 rule_set 定义：只保留当前规则引用的 + 已有的非 geosite/geoip 类型
+	missingTags := make(map[string]bool)
 	var ruleSetDefs []interface{}
 	if existingRS, ok := route["rule_set"].([]interface{}); ok {
 		for _, rs := range existingRS {
@@ -323,6 +325,16 @@ func ApplyRules() error {
 							delete(m, "url")
 							delete(m, "download_detour")
 							delete(m, "format")
+							// .srs 缺失时生成占位文件，避免 sing-box 启动失败
+							srsPath := filepath.Join(config.DataDir, "ruleset", t+".srs")
+							if _, err := os.Stat(srsPath); os.IsNotExist(err) {
+								if err := compileEmptyRuleSet(srsPath); err != nil {
+									log.Printf("⚠️ 生成 .srs 占位文件失败 %s: %v", t, err)
+									missingTags[t] = true
+									continue
+								}
+								log.Printf("📄 已生成 rule_set 占位文件: %s", srsPath)
+							}
 						}
 						ruleSetDefs = append(ruleSetDefs, rs)
 					} else if !strings.HasPrefix(t, "geosite-") && !strings.HasPrefix(t, "geoip-") {
@@ -335,7 +347,6 @@ func ApplyRules() error {
 	}
 
 	// 添加新的 rule_set 定义（当前规则引用但还没有定义的）
-	missingTags := make(map[string]bool)
 	for tag := range ruleSetTags {
 		found := false
 		for _, rs := range ruleSetDefs {
@@ -352,9 +363,13 @@ func ApplyRules() error {
 			if isGeo {
 				srsPath := filepath.Join(config.DataDir, "ruleset", tag+".srs")
 				if _, err := os.Stat(srsPath); os.IsNotExist(err) {
-					log.Printf("⚠️ 跳过 rule_set %s: .srs 文件不存在 (%s)，请先在设置页开启 Geo 规则集自动更新下载", tag, srsPath)
-					missingTags[tag] = true
-					continue
+					// .srs 缺失时生成占位文件，避免 sing-box 无法启动
+					if err := compileEmptyRuleSet(srsPath); err != nil {
+						log.Printf("⚠️ 跳过 rule_set %s: 生成 .srs 占位文件失败: %v", tag, err)
+						missingTags[tag] = true
+						continue
+					}
+					log.Printf("📄 已生成 rule_set 占位文件: %s", srsPath)
 				}
 				ruleSetDefs = append(ruleSetDefs, map[string]interface{}{
 					"tag":  tag,
@@ -460,4 +475,40 @@ func GetEnrichedOutbounds() []models.OutboundOption {
 		result = append(result, enriched)
 	}
 	return result
+}
+
+// compileEmptyRuleSet 使用 sing-box 命令行工具编译一个空的 .srs 占位文件。
+// 当环境缺少 .srs 文件时，生成占位文件避免 sing-box 启动失败，
+// 后续可通过 DownloadGeoRuleSets() 更新为真实规则集。
+func compileEmptyRuleSet(outputPath string) error {
+	// 确保目录存在
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
+		return fmt.Errorf("创建 ruleset 目录失败: %w", err)
+	}
+
+	// 创建临时 JSON 源文件
+	tmpFile, err := os.CreateTemp("", "empty-ruleset-*.json")
+	if err != nil {
+		return fmt.Errorf("创建临时文件失败: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+
+	_ = tmpFile.Close()
+
+	// 写入最小化的空 rule-set JSON
+	if err := os.WriteFile(tmpPath, []byte(`{"version":2,"rules":[]}`), 0644); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("写入临时 JSON 失败: %w", err)
+	}
+
+	// 调用 sing-box rule-set compile 生成 .srs
+	cmd := exec.Command(config.SingBoxBin, "rule-set", "compile", tmpPath, "-o", outputPath)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("sing-box compile 失败: %w, output: %s", err, string(output))
+	}
+
+	// 清理临时文件
+	os.Remove(tmpPath)
+	return nil
 }

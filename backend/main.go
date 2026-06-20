@@ -21,6 +21,13 @@ func main() {
 
 	// 仅当配置文件存在时才启动 sing-box
 	if _, err := os.Stat(config.SingBoxConfig); err == nil {
+		// 启动前先重建规则，自动生成缺失的 .srs 占位文件并清理无效 rule_set 引用
+		// 避免新环境缺少 .srs 文件导致 sing-box 启动失败（死循环）
+		if _, err := os.Stat(config.RulesPath()); err == nil {
+			if err := services.ApplyRules(); err != nil {
+				log.Printf("[main] ApplyRules 失败（继续启动）: %v", err)
+			}
+		}
 		log.Println("启动 sing-box ...")
 		services.StartSingBox()
 	} else {
