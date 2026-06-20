@@ -26,6 +26,23 @@ export default function SettingsPage() {
     })
   }, [])
 
+  // SSE 订阅 rule_sets 事件，下载完成后实时刷新状态
+  useEffect(() => {
+    const base = typeof window !== 'undefined'
+      ? (localStorage.getItem('apiUrl') || 'http://localhost:9092')
+      : ''
+    const es = new EventSource(`${base}/api/events?types=rule_sets`)
+    es.addEventListener('rule_sets', (e: MessageEvent) => {
+      try {
+        const d = JSON.parse(e.data)
+        if (Array.isArray(d.rule_sets)) {
+          setRuleSets(d.rule_sets)
+        }
+      } catch {}
+    })
+    return () => es.close()
+  }, [])
+
   const saveApiUrl = () => {
     localStorage.setItem('apiUrl', apiUrl)
     alert('已保存，刷新页面生效')
