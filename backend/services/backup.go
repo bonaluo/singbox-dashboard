@@ -3,6 +3,7 @@ package services
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"singbox-dashboard/config"
@@ -167,6 +168,14 @@ func ImportBackup(data []byte) (string, error) {
 
 	if len(restored) == 0 {
 		return "", fmt.Errorf("备份文件中没有可恢复的数据")
+	}
+
+	// 恢复 sing-box 配置和规则后，重新 ApplyRules() 让其自动生成缺失的 .srs 占位文件
+	// 避免新环境导入备份后缺少 .srs 文件导致 sing-box 启动失败（死循环）
+	if len(b.SingBoxConfig) > 0 && len(b.Rules) > 0 {
+		if err := ApplyRules(); err != nil {
+			log.Printf("⚠️ [ImportBackup] ApplyRules 失败: %v", err)
+		}
 	}
 
 	// 恢复后重启 sing-box 使配置生效
