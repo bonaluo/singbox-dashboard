@@ -1,0 +1,6 @@
+singbox-dashboard
+data/
+.git/
+*.exe
+*.test
+.env

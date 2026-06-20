@@ -10,8 +10,10 @@ COPY models/ models/
 COPY services/ services/
 RUN CGO_ENABLED=0 go build -ldflags="-X 'singbox-dashboard/config.GitCommit=${GIT_COMMIT}' -X 'singbox-dashboard/config.Version=${VERSION}'" -o singbox-dashboard .
 
-FROM ghcr.io/sagernet/sing-box:latest
-RUN apk add --no-cache curl
+FROM ghcr.io/sagernet/sing-box:v1.13.12
+# alpine 换源到阿里云（国内 docker 默认走国际源极慢）
+RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g' /etc/apk/repositories \
+ && apk add --no-cache curl
 COPY --from=builder /app/singbox-dashboard /usr/local/bin/
 ENTRYPOINT []
 EXPOSE 9092
