@@ -27,10 +27,11 @@ type RuleSetStatus struct {
 	OK   bool   `json:"ok"`    // 文件存在且大于 0
 }
 
-// GetRuleSetStatuses 返回所有 geo rule-set 文件的状态
+// GetRuleSetStatuses 返回当前 sing-box 配置中所有 rule_set 的状态
+// 从 route.rule_set 动态读取，不再写死 geoip-cn/geosite-cn
 func GetRuleSetStatuses() []RuleSetStatus {
-	tags := []string{"geoip-cn", "geosite-cn"}
 	var result []RuleSetStatus
+	tags := getConfiguredRuleSetTags()
 	for _, tag := range tags {
 		path := filepath.Join(config.DataDir, "ruleset", tag+".srs")
 		info, err := os.Stat(path)
@@ -41,6 +42,38 @@ func GetRuleSetStatuses() []RuleSetStatus {
 		}
 	}
 	return result
+}
+
+// getConfiguredRuleSetTags 从 sing-box 配置的 route.rule_set 提取所有 tag
+// 按配置顺序去重返回
+func getConfiguredRuleSetTags() []string {
+	cfg, err := loadSingBoxConfig()
+	if err != nil {
+		return nil
+	}
+	route, ok := cfg["route"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	rsList, ok := route["rule_set"].([]interface{})
+	if !ok {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var tags []string
+	for _, rs := range rsList {
+		m, ok := rs.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		tag, _ := m["tag"].(string)
+		if tag == "" || seen[tag] {
+			continue
+		}
+		seen[tag] = true
+		tags = append(tags, tag)
+	}
+	return tags
 }
 
 func geoUpdateConfigPath() string {
@@ -68,16 +101,15 @@ func LoadGeoUpdateConfig() GeoUpdateConfig {
 	return cfg
 }
 
-// DownloadGeoRuleSets 下载 geoip/geosite 规则集文件到本地
+// DownloadGeoRuleSets 下载配置中引用的 geo 规则集文件到本地
+// 只下载 route.rule_set 中实际定义的 tag，避免下载无关文件
 // 优先走内部代理（sing-box mixed-in 端口 2080），代理不可用时直连
 // 多镜像回退，下载失败时不阻塞（保留旧文件）
 func DownloadGeoRuleSets() error {
-	entries := []struct {
-		Tag  string
-		Repo string
-	}{
-		{"geoip-cn", "SagerNet/sing-geoip"},
-		{"geosite-cn", "SagerNet/sing-geosite"},
+	// 已知的 SagerNet 官方仓库映射（仅对 geosite-*/geoip-* 系列有效）
+	defaultRepo := map[string]string{
+		"geoip-cn":   "SagerNet/sing-geoip",
+		"geosite-cn": "SagerNet/sing-geosite",
 	}
 
 	// 尝试通过内部代理下载（sing-box mixed-in 支持 HTTP 代理）
@@ -88,14 +120,19 @@ func DownloadGeoRuleSets() error {
 	// 回退直连客户端
 	directClient := &http.Client{Timeout: 30 * time.Second}
 
-	for _, e := range entries {
-		filename := e.Tag + ".srs"
+	for _, tag := range getConfiguredRuleSetTags() {
+		repo, ok := defaultRepo[tag]
+		if !ok {
+			// 自定义 rule_set 暂不自动下载
+			continue
+		}
+		filename := tag + ".srs"
 		path := filepath.Join(config.DataDir, "ruleset", filename)
 		os.MkdirAll(filepath.Dir(path), 0755)
 
 		urls := []string{
-			fmt.Sprintf("https://raw.githubusercontent.com/%s/rule-set/%s", e.Repo, filename),
-			fmt.Sprintf("https://github.com/%s/raw/rule-set/%s", e.Repo, filename),
+			fmt.Sprintf("https://raw.githubusercontent.com/%s/rule-set/%s", repo, filename),
+			fmt.Sprintf("https://github.com/%s/raw/rule-set/%s", repo, filename),
 		}
 
 		var lastErr error
@@ -125,11 +162,11 @@ func DownloadGeoRuleSets() error {
 				return fmt.Errorf("写入 %s: %w", path, err)
 			}
 			lastErr = nil
-			log.Printf("✅ 已更新 rule-set: %s (%d bytes)", e.Tag, len(data))
+			log.Printf("✅ 已更新 rule-set: %s (%d bytes)", tag, len(data))
 			break
 		}
 		if lastErr != nil {
-			log.Printf("⚠️ 更新 rule-set %s 失败（保留旧文件）: %v", e.Tag, lastErr)
+			log.Printf("⚠️ 更新 rule-set %s 失败（保留旧文件）: %v", tag, lastErr)
 		}
 	}
 	return nil
@@ -223,14 +260,18 @@ func StartGeoUpdateLoop() {
 // 17 字节的空 rule-set，1KB 阈值足以区分占位与真实规则集
 const placeholderMaxSize = 1024
 
-// hasPlaceholderRuleSet 检查 data/ruleset/ 下是否存在占位 .srs 文件
+// hasPlaceholderRuleSet 检查配置中引用的 rule_set 是否存在占位 .srs 文件
 // 真实规则集通常 30KB+，占位文件 < 1KB
 func hasPlaceholderRuleSet() bool {
-	for _, tag := range []string{"geoip-cn", "geosite-cn"} {
+	tags := getConfiguredRuleSetTags()
+	if len(tags) == 0 {
+		return false
+	}
+	for _, tag := range tags {
 		path := filepath.Join(config.DataDir, "ruleset", tag+".srs")
 		info, err := os.Stat(path)
 		if err != nil {
-			return true // 文件不存在也算需要下载
+			return true // 文件不存在
 		}
 		if info.Size() < placeholderMaxSize {
 			return true
