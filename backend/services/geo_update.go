@@ -163,12 +163,16 @@ func DownloadGeoRuleSets() error {
 			}
 			lastErr = nil
 			log.Printf("✅ 已更新 rule-set: %s (%d bytes)", tag, len(data))
+			// 单个 rule-set 下载完成就广播一次，前端能即时看到
+			ForceBroadcastRuleSets()
 			break
 		}
 		if lastErr != nil {
 			log.Printf("⚠️ 更新 rule-set %s 失败（保留旧文件）: %v", tag, lastErr)
 		}
 	}
+	// 兜底：所有下载完成后再广播一次
+	ForceBroadcastRuleSets()
 	return nil
 }
 

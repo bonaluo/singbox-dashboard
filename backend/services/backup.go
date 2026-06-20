@@ -181,6 +181,16 @@ func ImportBackup(data []byte) (string, error) {
 	// 恢复后重启 sing-box 使配置生效
 	if len(b.SingBoxConfig) > 0 {
 		go RestartService()
+		// 异步下载真实规则集覆盖占位文件
+		// StartGeoUpdateLoop启动时配置为空会错过下载时机，这里主动触发一次
+		// 走后台 goroutine，不阻塞 import 返回
+		go func() {
+			time.Sleep(3 * time.Second) // 等待 sing-box 启动并就绪（走 2080 代理需要）
+			log.Println("[ImportBackup] 开始下载真实规则集覆盖占位文件...")
+			if err := DownloadGeoRuleSets(); err != nil {
+				log.Printf("⚠️ [ImportBackup] DownloadGeoRuleSets 失败: %v", err)
+			}
+		}()
 	}
 
 	return strings.Join(restored, "、"), nil

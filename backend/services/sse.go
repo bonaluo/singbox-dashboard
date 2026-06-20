@@ -75,6 +75,9 @@ func (h *SSEHub) Subscribe(types []string) *SSEClient {
 			case c.Ch <- SSEEvent{Type: "connections", Data: string(data)}:
 			default:
 			}
+		case "rule_sets":
+			// 立即发送当前 rule_set 状态
+			broadcastRuleSets(h)
 		case "logs":
 			// 日志不发初始快照，只推送增量
 		}
@@ -115,6 +118,28 @@ func ForceBroadcastStatus() {
 	if sseHub != nil {
 		sseHub.forceBroadcastStatus()
 	}
+}
+
+// ForceBroadcastRuleSets 立即广播当前 rule-set 状态
+// 在 DownloadGeoRuleSets 完成后调用，前端可立即看到更新
+func ForceBroadcastRuleSets() {
+	if sseHub != nil {
+		broadcastRuleSets(sseHub)
+	}
+}
+
+// broadcastRuleSets 收集并广播 rule-set 状态
+func broadcastRuleSets(h *SSEHub) {
+	statuses := GetRuleSetStatuses()
+	data, _ := json.Marshal(map[string]interface{}{
+		"rule_sets": statuses,
+	})
+	hash := fmt.Sprintf("%x", sha256.Sum256(data))
+	if h.lastHash["rule_sets"] == hash {
+		return
+	}
+	h.lastHash["rule_sets"] = hash
+	h.broadcast("rule_sets", string(data))
 }
 
 // ── 内部轮询 & 广播 ──
