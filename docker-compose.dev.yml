@@ -19,6 +19,8 @@ services:
         VERSION: ${VERSION:-unknown}
     image: ${BACKEND_IMAGE:-singbox-dashboard-backend}:${TAG:-local}
     container_name: singbox-backend
+    extra_hosts:
+      - "asus-qwertyuiop.dynv6.net:10.31.3.87"
     network_mode: bridge
     volumes:
       - ${DATA_DIR:-./data}:/data
