@@ -570,6 +570,12 @@ func detectRegion(tag string) string {
 		return "其他"
 	}
 
+	// 特殊修正：部分机场为合规在台湾节点 tag 上挂 🇨🇳 国旗，
+	// 但 tag 文本中仍保留 TW 代码；以文本中的 TW 为准。
+	if code == "CN" && containsTW(upper) {
+		code = "TW"
+	}
+
 	// 码→中文名（ISO 3166-1 完整映射）
 	name, ok := countryNames[code]
 	if !ok {
@@ -660,6 +666,24 @@ func codeToFlag(code string) string {
 		rune(code[0]-'A') + 0x1F1E6,
 		rune(code[1]-'A') + 0x1F1E6,
 	})
+}
+
+// containsTW 检查 tag 文本中是否包含 TW 地区码（非 CN 前缀）
+func containsTW(upper string) bool {
+	// 匹配 TW 作为独立词出现，避免误匹配 TWO TWIN 等
+	if strings.Contains(upper, "TW ") || strings.Contains(upper, "TW-") ||
+		strings.Contains(upper, "TW_") || strings.Contains(upper, "TW]") ||
+		strings.HasSuffix(upper, "TW") {
+		return true
+	}
+	// TW 后紧跟中文等非 ASCII 字符（如 TW台湾）
+	if idx := strings.Index(upper, "TW"); idx >= 0 {
+		after := idx + 2
+		if after < len(upper) && upper[after] > 127 {
+			return true
+		}
+	}
+	return false
 }
 
 func isCapsCode(s string) bool {
