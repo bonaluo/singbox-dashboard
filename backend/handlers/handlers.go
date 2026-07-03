@@ -9,6 +9,7 @@ import (
 	"singbox-dashboard/models"
 	"singbox-dashboard/services"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -73,6 +74,9 @@ func Register(mux *http.ServeMux) {
 	// ── 备份 ──
 	mux.HandleFunc("GET /api/backup/export", handleBackupExport)
 	mux.HandleFunc("POST /api/backup/import", handleBackupImport)
+
+	// ── 节点测试（SSE 推送进度）──
+	mux.HandleFunc("POST /api/nodes/test", handleNodeTest)
 
 	log.Println("[handlers] routes registered")
 }
@@ -646,4 +650,77 @@ func handleBackupImport(w http.ResponseWriter, r *http.Request) {
 		"msg":     "备份导入成功",
 		"summary": "已恢复: " + summary,
 	})
+}
+
+// ── 节点测试（SSE 实时推送进度）──
+
+func handleNodeTest(w http.ResponseWriter, r *http.Request) {
+	var req services.NodeTestRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendError(w, 400, "invalid JSON")
+		return
+	}
+	if len(req.Tags) == 0 {
+		sendError(w, 400, "tags required")
+		return
+	}
+	if req.Concurrency <= 0 {
+		req.Concurrency = 5
+	}
+
+	// setup SSE
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(200)
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		// WriteHeader already sent 200, just log and return
+		log.Println("[node-test] streaming not supported, fallback")
+		return
+	}
+
+	ctx := r.Context()
+	var wg sync.WaitGroup
+	var writeMu sync.Mutex // 保护 w.Write 并发写入
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+		services.TestNodesStream(req, func(evt services.NodeTestEvent) {
+			// 检查 context 是否已取消（客户端断开）
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			data, err := json.Marshal(evt)
+			if err != nil {
+				return
+			}
+			writeMu.Lock()
+			fmt.Fprintf(w, "data: %s\n\n", string(data))
+			flusher.Flush()
+			writeMu.Unlock()
+		})
+	}()
+
+	// 等待 goroutine 完成或客户端断开
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// 测试正常完成
+	case <-ctx.Done():
+		// 客户端断开
+	}
+	// 确保 goroutine 完全退出后再返回，防止并发写 response writer
+	wg.Wait()
 }

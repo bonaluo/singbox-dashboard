@@ -14,11 +14,13 @@ export default function OutboundSelectorModal({
   onChange,
   options,
   disabled,
+  onAutoSelect,
 }: {
   value: string
   onChange: (v: string) => void
   options: OutboundOption[]
   disabled?: boolean
+  onAutoSelect?: () => void
 }) {
   const [open, setOpen] = useState(false)
 
@@ -123,6 +125,22 @@ export default function OutboundSelectorModal({
 
             {/* Body */}
             <div className="flex-1 overflow-y-auto px-5 py-3 space-y-4">
+              {/* 自动选择最佳节点 */}
+              {onAutoSelect && (
+                <div>
+                  <button
+                    onClick={() => { setOpen(false); onAutoSelect() }}
+                    className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm border border-dashed border-[var(--accent)]/50 bg-[var(--accent)]/5 hover:bg-[var(--accent)]/10 hover:border-[var(--accent)] transition-all text-left"
+                  >
+                    <span className="text-xl">🧪</span>
+                    <div>
+                      <div className="font-medium text-[var(--accent)]">自动选择延迟最低/下载最快的节点</div>
+                      <div className="text-xs text-gray-500 mt-0.5">测试所有节点延迟和下载速度，自动选出最佳节点</div>
+                    </div>
+                  </button>
+                </div>
+              )}
+
               {/* 组（selector / urltest / direct） */}
               {groups.length > 0 && (
                 <div>

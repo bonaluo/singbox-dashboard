@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '@/components/Sidebar'
 import OutboundSelectorModal from '@/components/OutboundSelectorModal'
+import NodeTestModal from '@/components/NodeTestModal'
 
 // ── 类型 ──
 
@@ -112,6 +113,12 @@ export default function RulesPage() {
   const [formOutbound, setFormOutbound] = useState('proxy')
   const [formInvert, setFormInvert] = useState(false)
   const [formComment, setFormComment] = useState('')
+  const [showTestModal, setShowTestModal] = useState(false)
+
+  // 可测试的节点（非组、非 direct 的独立节点）
+  const testableNodes = outbounds.filter(
+    o => o.type !== 'selector' && o.type !== 'urltest' && o.type !== 'loadbalance' && o.type !== 'direct'
+  )
 
   const resetForm = () => {
     setFormType('domain_suffix')
@@ -133,21 +140,24 @@ export default function RulesPage() {
 
   useEffect(() => { loadRules() }, [loadRules])
 
+  // 构建请求体
+  const buildRuleBody = (overrides?: { outbound?: string }) => ({
+    type: formType,
+    value: formValue,
+    action: formAction,
+    outbound: formAction === 'route' ? (overrides?.outbound ?? formOutbound) : '',
+    invert: formInvert,
+    comment: formComment,
+    enabled: true,
+    conditions: [{ type: formType, values: formValue.split(',').map((s: string) => s.trim()).filter(Boolean) }],
+  })
+
   // 添加/更新规则
-  const saveRule = async () => {
+  const saveRule = async (overrides?: { outbound?: string }) => {
     if (!formValue) return
     setLoading(true)
 
-    const body = {
-      type: formType,
-      value: formValue,
-      action: formAction,
-      outbound: formAction === 'route' ? formOutbound : '',
-      invert: formInvert,
-      comment: formComment,
-      enabled: true,
-      conditions: [{ type: formType, values: formValue.split(',').map((s: string) => s.trim()).filter(Boolean) }],
-    }
+    const body = buildRuleBody(overrides)
 
     if (editingId) {
       await api(`/api/rules/${editingId}`, {
@@ -165,6 +175,39 @@ export default function RulesPage() {
     setShowForm(false)
     loadRules()
     setLoading(false)
+  }
+
+  // 添加并应用规则
+  const saveAndApplyRule = async (overrides?: { outbound?: string }) => {
+    if (!formValue) return
+    setLoading(true)
+
+    const body = buildRuleBody(overrides)
+
+    await api('/api/rules', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
+
+    resetForm()
+    setShowForm(false)
+    await loadRules()
+    // 自动应用规则
+    await api('/api/rules/apply', { method: 'POST' })
+    setLoading(false)
+  }
+
+  // 测试模态框回调：从 NodeTestModal 选择节点后，设置出站并保存
+  const handleTestModalAdd = async (tag: string) => {
+    setFormOutbound(tag)
+    setShowTestModal(false)
+    await saveRule({ outbound: tag })
+  }
+
+  const handleTestModalAddAndApply = async (tag: string) => {
+    setFormOutbound(tag)
+    setShowTestModal(false)
+    await saveAndApplyRule({ outbound: tag })
   }
 
   const editRule = (rule: any) => {
@@ -352,6 +395,7 @@ export default function RulesPage() {
                 onChange={setFormOutbound}
                 options={outbounds}
                 disabled={formAction !== 'route'}
+                onAutoSelect={() => setShowTestModal(true)}
               />
             </div>
             <div>
@@ -383,12 +427,21 @@ export default function RulesPage() {
           {/* 提交按钮 */}
           <div className="flex gap-2">
             <button
-              onClick={saveRule}
+              onClick={() => saveRule()}
               disabled={loading || !formValue}
               className="bg-[var(--accent)] text-white px-6 py-2 rounded-lg text-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
             >
               {editingId ? '保存修改' : '添加'}
             </button>
+            {!editingId && (
+              <button
+                onClick={() => saveAndApplyRule()}
+                disabled={loading || !formValue}
+                className="bg-green-600 text-white px-6 py-2 rounded-lg text-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
+              >
+                {loading ? '应用中...' : '添加并应用'}
+              </button>
+            )}
             {editingId && (
               <button
                 onClick={() => { resetForm(); setShowForm(false) }}
@@ -399,6 +452,17 @@ export default function RulesPage() {
             )}
           </div>
         </div>
+      )}
+
+      {/* 节点测试模态框 */}
+      {showTestModal && (
+        <NodeTestModal
+          nodes={testableNodes}
+          onSelect={(tag) => setFormOutbound(tag)}
+          onClose={() => setShowTestModal(false)}
+          onAdd={handleTestModalAdd}
+          onAddAndApply={handleTestModalAddAndApply}
+        />
       )}
 
       {/* 规则列表 */}
