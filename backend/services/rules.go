@@ -57,6 +57,10 @@ func AddRule(r *models.Rule) (*models.Rule, error) {
 	if err != nil {
 		return nil, err
 	}
+	// 检查重复：匹配字段和匹配值完全相同的规则不允许重复添加
+	if isDuplicateRule(store, r) {
+		return nil, fmt.Errorf("重复规则：匹配字段和匹配值完全相同的规则已存在")
+	}
 	r.ID = fmt.Sprintf("rule_%d", time.Now().UnixMilli())
 	// 自动分配 priority：已有最大 priority + 1
 	if r.Priority <= 0 {
@@ -81,6 +85,15 @@ func UpdateRule(r *models.Rule) error {
 	store, err := LoadRules()
 	if err != nil {
 		return err
+	}
+	// 检查重复：排除自身，匹配字段和匹配值相同的规则不允许
+	for _, existing := range store.Rules {
+		if existing.ID == r.ID {
+			continue // 跳过自身
+		}
+		if conditionsEqual(r.MigrateConditions(), existing.MigrateConditions()) {
+			return fmt.Errorf("重复规则：匹配字段和匹配值完全相同的规则已存在")
+		}
 	}
 	for i := range store.Rules {
 		if store.Rules[i].ID == r.ID {
@@ -511,4 +524,58 @@ func compileEmptyRuleSet(outputPath string) error {
 	// 清理临时文件
 	os.Remove(tmpPath)
 	return nil
+}
+
+// isDuplicateRule 检查新规则是否与已有规则重复
+// 重复判定：新规则的 conditions 与某条已有规则的 conditions 完全一致（类型+值均相同）
+func isDuplicateRule(store *models.RuleStore, newRule *models.Rule) bool {
+	newConds := newRule.MigrateConditions()
+	if len(newConds) == 0 {
+		return false
+	}
+
+	for _, existing := range store.Rules {
+		existingConds := existing.MigrateConditions()
+		if conditionsEqual(newConds, existingConds) {
+			return true
+		}
+	}
+	return false
+}
+
+// conditionsEqual 比较两组条件是否完全一致（类型和值集合均相同，忽略顺序）
+func conditionsEqual(a, b []models.RuleCondition) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	// 为每个条件构建 fingerprint: type + sorted values
+	buildFingerprints := func(conds []models.RuleCondition) map[string]bool {
+		fp := make(map[string]bool)
+		for _, c := range conds {
+			key := conditionKey(c)
+			fp[key] = true
+		}
+		return fp
+	}
+
+	aFP := buildFingerprints(a)
+	bFP := buildFingerprints(b)
+
+	if len(aFP) != len(bFP) {
+		return false
+	}
+	for k := range aFP {
+		if !bFP[k] {
+			return false
+		}
+	}
+	return true
+}
+
+// conditionKey 为单个条件生成可比较的唯一 key
+func conditionKey(c models.RuleCondition) string {
+	vals := make([]string, len(c.Values))
+	copy(vals, c.Values)
+	sort.Strings(vals)
+	return c.Type + ":" + strings.Join(vals, ",")
 }

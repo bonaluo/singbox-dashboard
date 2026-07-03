@@ -152,9 +152,26 @@ export default function RulesPage() {
     conditions: [{ type: formType, values: formValue.split(',').map((s: string) => s.trim()).filter(Boolean) }],
   })
 
+  // 检查重复规则
+  const isDuplicateRule = (type: string, value: string): boolean => {
+    if (editingId) return false // 编辑模式允许保留原值
+    const normVal = value.split(',').map(s => s.trim()).filter(Boolean).sort().join(',')
+    return rules.some(r => {
+      const conds = r.conditions || []
+      if (conds.length !== 1) return false
+      const c = conds[0]
+      const existingVal = (c.values || []).sort().join(',')
+      return c.type === type && existingVal === normVal
+    })
+  }
+
   // 添加/更新规则
   const saveRule = async (overrides?: { outbound?: string }) => {
     if (!formValue) return
+    if (isDuplicateRule(formType, formValue)) {
+      alert('重复规则：匹配字段和匹配值完全相同的规则已存在')
+      return
+    }
     setLoading(true)
 
     const body = buildRuleBody(overrides)
@@ -180,6 +197,10 @@ export default function RulesPage() {
   // 添加并应用规则
   const saveAndApplyRule = async (overrides?: { outbound?: string }) => {
     if (!formValue) return
+    if (isDuplicateRule(formType, formValue)) {
+      alert('重复规则：匹配字段和匹配值完全相同的规则已存在')
+      return
+    }
     setLoading(true)
 
     const body = buildRuleBody(overrides)
