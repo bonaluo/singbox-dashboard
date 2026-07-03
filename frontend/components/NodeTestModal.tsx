@@ -600,7 +600,7 @@ export default function NodeTestModal({
                           : 'text-gray-500 hover:text-gray-300'
                       }`}
                     >
-                      下载 {sortKey === 'download' && (sortAsc ? '↑' : '↓')}
+                      下载速度 {sortKey === 'download' && (sortAsc ? '↑' : '↓')}
                     </button>
                   )}
                 </div>

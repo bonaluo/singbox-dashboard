@@ -113,6 +113,7 @@ export default function RulesPage() {
   const [formOutbound, setFormOutbound] = useState('proxy')
   const [formInvert, setFormInvert] = useState(false)
   const [formComment, setFormComment] = useState('')
+  const [formError, setFormError] = useState('')
   const [showTestModal, setShowTestModal] = useState(false)
 
   // 可测试的节点（非组、非 direct 的独立节点）
@@ -127,6 +128,7 @@ export default function RulesPage() {
     setFormOutbound('proxy')
     setFormInvert(false)
     setFormComment('')
+    setFormError('')
     setEditingId(null)
   }
 
@@ -169,7 +171,7 @@ export default function RulesPage() {
   const saveRule = async (overrides?: { outbound?: string }) => {
     if (!formValue) return
     if (isDuplicateRule(formType, formValue)) {
-      alert('重复规则：匹配字段和匹配值完全相同的规则已存在')
+      setFormError('重复规则：匹配字段和匹配值完全相同的规则已存在')
       return
     }
     setLoading(true)
@@ -198,7 +200,7 @@ export default function RulesPage() {
   const saveAndApplyRule = async (overrides?: { outbound?: string }) => {
     if (!formValue) return
     if (isDuplicateRule(formType, formValue)) {
-      alert('重复规则：匹配字段和匹配值完全相同的规则已存在')
+      setFormError('重复规则：匹配字段和匹配值完全相同的规则已存在')
       return
     }
     setLoading(true)
@@ -444,6 +446,20 @@ export default function RulesPage() {
               />
             </div>
           </div>
+
+          {/* 表单错误提示 */}
+          {formError && (
+            <div className="mb-3 px-4 py-2.5 bg-red-500/10 border border-red-500/30 rounded-lg flex items-center gap-2">
+              <span className="text-sm">⚠️</span>
+              <span className="text-sm text-red-400">{formError}</span>
+              <button
+                onClick={() => setFormError('')}
+                className="ml-auto text-red-400 hover:text-red-300 text-sm"
+              >
+                ✕
+              </button>
+            </div>
+          )}
 
           {/* 提交按钮 */}
           <div className="flex gap-2">

@@ -43,9 +43,12 @@ export default function SettingsPage() {
     return () => es.close()
   }, [])
 
+  const [apiMsg, setApiMsg] = useState('')
+
   const saveApiUrl = () => {
     localStorage.setItem('apiUrl', apiUrl)
-    alert('已保存，刷新页面生效')
+    setApiMsg('✅ 已保存，刷新页面生效')
+    setTimeout(() => setApiMsg(''), 3000)
   }
 
   const saveGeoInterval = async () => {
@@ -246,6 +249,9 @@ export default function SettingsPage() {
             保存
           </button>
         </div>
+        {apiMsg && (
+          <div className="mt-2 text-sm text-green-400">{apiMsg}</div>
+        )}
       </div>
 
       <div className="bg-[var(--surface)] rounded-xl p-4 border border-[var(--border)]">

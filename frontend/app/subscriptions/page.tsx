@@ -15,6 +15,7 @@ export default function SubscriptionsPage() {
 
   // 聚合相关
   const [showMerge, setShowMerge] = useState(false)
+  const [subMsg, setSubMsg] = useState('')
   const [mergeName, setMergeName] = useState('')
   const [mergeSources, setMergeSources] = useState<Set<string>>(new Set())
   const [mergeExtraUrl, setMergeExtraUrl] = useState('')
@@ -44,7 +45,7 @@ export default function SubscriptionsPage() {
       setExpandedId(sub.id)
       await loadSubs()
     } else {
-      alert(r.error || '添加失败')
+      setSubMsg('❌ ' + (r.error || '添加失败'))
     }
     setLoading(false)
   }
@@ -114,7 +115,7 @@ export default function SubscriptionsPage() {
       setShowMerge(false)
       await loadSubs()
     } else {
-      alert(r.error || '聚合失败')
+      setSubMsg('❌ ' + (r.error || '聚合失败'))
     }
     setLoading(false)
   }
@@ -122,6 +123,13 @@ export default function SubscriptionsPage() {
   return (
     <div className="max-w-4xl">
       <h2 className="text-xl font-bold mb-4">📡 订阅管理</h2>
+
+      {subMsg && (
+        <div className="mb-4 px-4 py-2.5 bg-red-500/10 border border-red-500/30 rounded-lg flex items-center gap-2">
+          <span className="text-sm text-red-400">{subMsg}</span>
+          <button onClick={() => setSubMsg('')} className="ml-auto text-red-400 hover:text-red-300 text-sm">✕</button>
+        </div>
+      )}
 
       <div className="bg-[var(--surface)] rounded-xl p-4 mb-6 border border-[var(--border)]">
         <h3 className="font-semibold mb-3">添加订阅</h3>
