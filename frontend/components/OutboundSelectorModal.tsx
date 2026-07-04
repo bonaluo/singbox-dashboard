@@ -49,6 +49,7 @@ export default function OutboundSelectorModal({
     const short: Record<string, string> = {
       urltest: 'URL',
       selector: 'SEL',
+      loadbalance: 'LB',
       direct: 'DIR',
       vmess: 'VM',
       vless: 'VL',
@@ -59,8 +60,8 @@ export default function OutboundSelectorModal({
   }
 
   // 按类型分组：组在前，单节点在后
-  const groups = options.filter(o => o.type === 'selector' || o.type === 'urltest' || o.type === 'direct')
-  const nodes = options.filter(o => o.type !== 'selector' && o.type !== 'urltest' && o.type !== 'direct')
+  const groups = options.filter(o => o.type === 'selector' || o.type === 'urltest' || o.type === 'loadbalance' || o.type === 'direct')
+  const nodes = options.filter(o => o.type !== 'selector' && o.type !== 'urltest' && o.type !== 'loadbalance' && o.type !== 'direct')
 
   const selected = options.find(o => o.tag === value)
 

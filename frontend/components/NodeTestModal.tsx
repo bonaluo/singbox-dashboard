@@ -708,7 +708,7 @@ export default function NodeTestModal({
                           className={`border-t border-[var(--border)] transition-colors cursor-pointer hover:bg-[var(--accent)]/5 ${
                             selectedTag === r.tag ? 'bg-[var(--accent)]/10 ring-1 ring-inset ring-[var(--accent)]' : ''
                           }`}
-                          onClick={() => setSelectedTag(r.tag)}
+                          onClick={() => { setSelectedTag(r.tag); onSelect?.(r.tag) }}
                         >
                           <td className="px-4 py-2 text-xs text-gray-500">{i + 1}</td>
                           <td className="px-2 py-2">
