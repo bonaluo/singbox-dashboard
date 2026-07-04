@@ -1,4 +1,5 @@
 ARG GO_IMAGE=golang:1.25-alpine
+ARG SINGBOX_IMAGE=ghcr.io/sagernet/sing-box:v1.13.12
 FROM ${GO_IMAGE} AS builder
 ARG GIT_COMMIT=unknown
 ARG VERSION=unknown
@@ -10,7 +11,6 @@ COPY models/ models/
 COPY services/ services/
 RUN CGO_ENABLED=0 go build -ldflags="-X 'singbox-dashboard/config.GitCommit=${GIT_COMMIT}' -X 'singbox-dashboard/config.Version=${VERSION}'" -o singbox-dashboard .
 
-ARG SINGBOX_IMAGE=ghcr.io/sagernet/sing-box:v1.13.12
 FROM ${SINGBOX_IMAGE}
 # alpine 换源到阿里云（国内 docker 默认走国际源极慢）
 RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g' /etc/apk/repositories \
