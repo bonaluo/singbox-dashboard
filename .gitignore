@@ -6,3 +6,4 @@ data/
 *.exe
 *.test
 .env
+.env.dev

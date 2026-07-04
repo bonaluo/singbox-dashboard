@@ -18,7 +18,7 @@ services:
         GIT_COMMIT: ${GIT_COMMIT:-unknown}
         VERSION: ${VERSION:-unknown}
     image: ${BACKEND_IMAGE:-singbox-dashboard-backend}:${TAG:-local}
-    container_name: singbox-backend-dev
+    container_name: ${BACKEND_CONTAINER:-singbox-backend-dev}
     extra_hosts:
       - "asus-qwertyuiop.dynv6.net:10.31.3.87"
     network_mode: bridge
@@ -45,7 +45,7 @@ services:
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
         NEXT_PUBLIC_API: ${NEXT_PUBLIC_API:-http://localhost:9092}
     image: ${FRONTEND_IMAGE:-singbox-dashboard-frontend}:${TAG:-local}
-    container_name: singbox-frontend-dev
+    container_name: ${FRONTEND_CONTAINER:-singbox-frontend-dev}
     network_mode: bridge
     ports:
       - "${FRONTEND_PORT:-9000}:9000"
