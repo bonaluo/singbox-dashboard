@@ -36,16 +36,23 @@ export default function NodeTestModal({
   onClose,
   onAdd,
   onAddAndApply,
+  suggestedDomain,
+  editing,
 }: {
   nodes: OutboundOption[]
   onSelect: (tag: string) => void
   onClose: () => void
   onAdd: (outbound: string) => void
   onAddAndApply: (outbound: string) => void
+  suggestedDomain?: string
+  editing?: boolean
 }) {
   const [testLatency, setTestLatency] = useState(true)
   const [testDownload, setTestDownload] = useState(false)
   const [concurrency, setConcurrency] = useState(5)
+  const [latencyUrl, setLatencyUrl] = useState('')
+  const [downloadUrl, setDownloadUrl] = useState('')
+  const [useSuggestedDomain, setUseSuggestedDomain] = useState(false)
   const [testing, setTesting] = useState(false)
   const [testDone, setTestDone] = useState(false)
   const [results, setResults] = useState<Map<string, NodeTestResult>>(new Map())
@@ -79,6 +86,18 @@ export default function NodeTestModal({
   }, [nodes])
 
   useEffect(() => { resetResults() }, [resetResults])
+
+  // 勾选"使用当前规则域名"时自动填充 URL
+  useEffect(() => {
+    if (useSuggestedDomain && suggestedDomain) {
+      const url = suggestedDomain.startsWith('http') ? suggestedDomain : `https://${suggestedDomain}`
+      if (testLatency) setLatencyUrl(url)
+      if (testDownload) setDownloadUrl(url)
+    } else if (!useSuggestedDomain) {
+      setLatencyUrl('')
+      setDownloadUrl('')
+    }
+  }, [useSuggestedDomain, suggestedDomain])
 
   // Start testing
   const startTest = async () => {
@@ -127,7 +146,13 @@ export default function NodeTestModal({
       const response = await fetch(`${base}/api/nodes/test`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tags, concurrency, tests }),
+        body: JSON.stringify({
+          tags,
+          concurrency,
+          tests,
+          latency_url: latencyUrl || '',
+          download_url: downloadUrl || '',
+        }),
         signal: abortRef.current.signal,
       })
 
@@ -490,10 +515,56 @@ export default function NodeTestModal({
                 <span className="text-xs text-gray-600">（同时测试的节点数，建议 5-10）</span>
               </div>
 
+              {/* Suggested domain toggle */}
+              {suggestedDomain && (
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={useSuggestedDomain}
+                    onChange={e => setUseSuggestedDomain(e.target.checked)}
+                    className="w-4 h-4 accent-[var(--accent)]"
+                  />
+                  <span className="text-sm text-gray-400">
+                    使用当前规则域名作为测试目标（<code className="text-[var(--accent)] text-xs">{suggestedDomain}</code>）
+                  </span>
+                </label>
+              )}
+
+              {/* Custom latency URL */}
+              {testLatency && (
+                <div className="flex items-center gap-3">
+                  <label className="text-sm text-gray-400 shrink-0">延迟 URL:</label>
+                  <input
+                    type="text"
+                    value={latencyUrl}
+                    onChange={e => { setLatencyUrl(e.target.value); setUseSuggestedDomain(false) }}
+                    placeholder={useSuggestedDomain && suggestedDomain ? `https://${suggestedDomain}` : '默认: http://www.gstatic.com/generate_204'}
+                    className="flex-1 bg-[#0f1419] border border-[var(--border)] rounded-lg px-3 py-1.5 text-sm text-gray-300 placeholder-gray-600"
+                  />
+                </div>
+              )}
+
+              {/* Custom download URL */}
+              {testDownload && (
+                <div className="flex items-center gap-3">
+                  <label className="text-sm text-gray-400 shrink-0">下载 URL:</label>
+                  <input
+                    type="text"
+                    value={downloadUrl}
+                    onChange={e => { setDownloadUrl(e.target.value); setUseSuggestedDomain(false) }}
+                    placeholder={useSuggestedDomain && suggestedDomain ? `https://${suggestedDomain}` : '默认: https://speed.cloudflare.com/__down?bytes=524288'}
+                    className="flex-1 bg-[#0f1419] border border-[var(--border)] rounded-lg px-3 py-1.5 text-sm text-gray-300 placeholder-gray-600"
+                  />
+                </div>
+              )}
+
               {/* Test count */}
               <div className="text-xs text-gray-500">
                 将测试 <span className="text-[var(--accent)] font-mono">{nodes.length}</span> 个节点
                 {testLatency && testDownload && '（延迟+下载并行）'}
+                {(latencyUrl || downloadUrl) && (
+                  <span className="text-[var(--accent)]"> · 使用自定义目标 URL</span>
+                )}
               </div>
 
               {/* Start button */}
@@ -734,14 +805,14 @@ export default function NodeTestModal({
               disabled={!selectedTag || adding}
               className="bg-[var(--accent)] text-white px-5 py-2 rounded-lg text-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
             >
-              {adding ? '添加中...' : '添加'}
+              {adding ? (editing ? '保存中...' : '添加中...') : (editing ? '保存' : '添加')}
             </button>
             <button
               onClick={handleAddAndApply}
               disabled={!selectedTag || adding}
               className="bg-green-600 text-white px-5 py-2 rounded-lg text-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
             >
-              {adding ? '应用中...' : '添加并应用'}
+              {adding ? '应用中...' : (editing ? '保存并应用' : '添加并应用')}
             </button>
           </div>
         </div>

@@ -15,6 +15,7 @@ export default function SettingsPage() {
   const [exporting, setExporting] = useState(false)
   const [importing, setImporting] = useState(false)
   const [backupMsg, setBackupMsg] = useState('')
+  const [singBoxVersion, setSingBoxVersion] = useState('')
 
   useEffect(() => {
     api('/api/settings/geo-update').then(r => {
@@ -22,6 +23,11 @@ export default function SettingsPage() {
         setGeoInterval(r.data.interval || 'off')
         setGeoLastUpdated(r.data.last_updated || '')
         setRuleSets(r.data.rule_sets || [])
+      }
+    })
+    api('/api/status').then(r => {
+      if (r.ok && r.data.singbox_version) {
+        setSingBoxVersion(r.data.singbox_version)
       }
     })
   }, [])
@@ -253,6 +259,19 @@ export default function SettingsPage() {
           <div className="mt-2 text-sm text-green-400">{apiMsg}</div>
         )}
       </div>
+
+      {singBoxVersion && (
+        <div className="bg-[var(--surface)] rounded-xl p-4 mb-4 border border-[var(--border)]">
+          <h3 className="font-semibold mb-1">🛠 运行环境</h3>
+          <div className="text-sm text-gray-400">
+            <span className="text-gray-500">sing-box 版本:</span>{' '}
+            <span className="font-mono text-[var(--accent)]">{singBoxVersion}</span>
+          </div>
+          <div className="mt-1 text-xs text-gray-600">
+            内置在 Docker 镜像中，与 sing-box 官方同步更新
+          </div>
+        </div>
+      )}
 
       <div className="bg-[var(--surface)] rounded-xl p-4 border border-[var(--border)]">
         <h3 className="font-semibold mb-2">🌐 Geo 规则集自动更新</h3>

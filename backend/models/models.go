@@ -145,12 +145,13 @@ type GroupMember struct {
 // ── Status ──
 
 type StatusResponse struct {
-	Running    bool   `json:"running"`
-	Current    string `json:"current"`
-	Uptime     string `json:"uptime,omitempty"`
-	TotalNodes int    `json:"total_nodes"`
-	Version    string `json:"version,omitempty"`
-	GitCommit  string `json:"git_commit,omitempty"`
+	Running        bool   `json:"running"`
+	Current        string `json:"current"`
+	Uptime         string `json:"uptime,omitempty"`
+	TotalNodes     int    `json:"total_nodes"`
+	Version        string `json:"version,omitempty"`
+	GitCommit      string `json:"git_commit,omitempty"`
+	SingBoxVersion string `json:"singbox_version,omitempty"`
 }
 
 // ── API responses ──

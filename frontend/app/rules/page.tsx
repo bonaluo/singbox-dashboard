@@ -207,10 +207,17 @@ export default function RulesPage() {
 
     const body = buildRuleBody(overrides)
 
-    await api('/api/rules', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    })
+    if (editingId) {
+      await api(`/api/rules/${editingId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ ...body, id: editingId }),
+      })
+    } else {
+      await api('/api/rules', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      })
+    }
 
     resetForm()
     setShowForm(false)
@@ -470,15 +477,13 @@ export default function RulesPage() {
             >
               {editingId ? '保存修改' : '添加'}
             </button>
-            {!editingId && (
-              <button
-                onClick={() => saveAndApplyRule()}
-                disabled={loading || !formValue}
-                className="bg-green-600 text-white px-6 py-2 rounded-lg text-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
-              >
-                {loading ? '应用中...' : '添加并应用'}
-              </button>
-            )}
+            <button
+              onClick={() => saveAndApplyRule()}
+              disabled={loading || !formValue}
+              className="bg-green-600 text-white px-6 py-2 rounded-lg text-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
+            >
+              {loading ? '应用中...' : (editingId ? '保存并应用' : '添加并应用')}
+            </button>
             {editingId && (
               <button
                 onClick={() => { resetForm(); setShowForm(false) }}
@@ -499,6 +504,8 @@ export default function RulesPage() {
           onClose={() => setShowTestModal(false)}
           onAdd={handleTestModalAdd}
           onAddAndApply={handleTestModalAddAndApply}
+          suggestedDomain={formType.startsWith('domain') ? formValue.split(',')[0].trim() : undefined}
+          editing={!!editingId}
         />
       )}
 

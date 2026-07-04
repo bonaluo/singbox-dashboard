@@ -95,8 +95,10 @@ func GetStatus() models.StatusResponse {
 	current := getClashCurrent()
 	running := isRunning()
 	uptime := ""
+	sbVersion := ""
 	if running {
 		uptime = getUptime()
+		sbVersion = getSingBoxVersion()
 	}
 	total := 0
 	if cfg != nil {
@@ -115,6 +117,7 @@ func GetStatus() models.StatusResponse {
 		TotalNodes: total,
 		Version:    config.Version,
 		GitCommit:  config.GitCommit,
+			SingBoxVersion: sbVersion,
 	}
 }
 
@@ -516,6 +519,21 @@ func loadSingBoxConfig() (map[string]interface{}, error) {
 func isRunning() bool {
 	cmd := exec.Command("curl", "-s", "--noproxy", "*", "--max-time", "2", config.ClashAPI+"/version")
 	return cmd.Run() == nil
+}
+
+func getSingBoxVersion() string {
+	cmd := exec.Command("curl", "-s", "--noproxy", "*", "--max-time", "2", config.ClashAPI+"/version")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	var v struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(out, &v); err != nil {
+		return ""
+	}
+	return v.Version
 }
 
 func getUptime() string {
