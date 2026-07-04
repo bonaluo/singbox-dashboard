@@ -17,7 +17,7 @@ services:
         GO_IMAGE: ${GO_IMAGE:-docker.m.daocloud.io/library/golang:1.25-alpine}
         GIT_COMMIT: ${GIT_COMMIT:-unknown}
         VERSION: ${VERSION:-unknown}
-    image: ${BACKEND_IMAGE:-singbox-dashboard-backend}:${TAG:-local}
+    image: ${BACKEND_IMAGE:-singbox-dashboard-backend}:${BUILD_DATE:-local}
     container_name: ${BACKEND_CONTAINER:-singbox-backend-dev}
     extra_hosts:
       - "asus-qwertyuiop.dynv6.net:10.31.3.87"
@@ -44,7 +44,7 @@ services:
         NODE_IMAGE: ${NODE_IMAGE:-docker.m.daocloud.io/library/node:22-alpine}
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
         NEXT_PUBLIC_API: ${NEXT_PUBLIC_API:-http://localhost:9092}
-    image: ${FRONTEND_IMAGE:-singbox-dashboard-frontend}:${TAG:-local}
+    image: ${FRONTEND_IMAGE:-singbox-dashboard-frontend}:${BUILD_DATE:-local}
     container_name: ${FRONTEND_CONTAINER:-singbox-frontend-dev}
     network_mode: bridge
     ports:
