@@ -17,6 +17,7 @@ services:
         GO_IMAGE: ${GO_IMAGE:-docker.m.daocloud.io/library/golang:1.25-alpine}
         GIT_COMMIT: ${GIT_COMMIT:-unknown}
         VERSION: ${VERSION:-unknown}
+        SINGBOX_IMAGE: ${SINGBOX_IMAGE:-ghcr.io/sagernet/sing-box:v1.13.12}
     image: ${BACKEND_IMAGE:-singbox-dashboard-backend}:${BUILD_DATE:-local}
     container_name: ${BACKEND_CONTAINER:-singbox-backend-dev}
     extra_hosts:

@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-BUILD_DATE=$(date +%y.%m.%d.%H.%M)
+BUILD_DATE=$(TZ=Asia/Shanghai date +%y.%m.%d.%H.%M)
 GIT_COMMIT=$(git rev-parse --short HEAD)
 VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo 'unknown')
 VERSION=${VERSION}-${BUILD_DATE}
