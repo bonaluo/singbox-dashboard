@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { api } from '@/components/Sidebar'
+import { api, getApiUrl } from '@/components/Sidebar'
 
 interface OutboundOption {
   tag: string
@@ -135,13 +135,7 @@ export default function NodeTestModal({
     })
 
     try {
-      const base = (() => {
-        if (typeof window !== 'undefined') {
-          const stored = localStorage.getItem('apiUrl')
-          if (stored) return stored
-        }
-        return process.env.NEXT_PUBLIC_API || 'http://localhost:9092'
-      })()
+      const base = getApiUrl()
 
       const response = await fetch(`${base}/api/nodes/test`, {
         method: 'POST',

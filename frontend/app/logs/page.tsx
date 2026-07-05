@@ -1,6 +1,6 @@
 'use client'
 
-import { api } from '@/components/Sidebar'
+import { api, getApiUrl } from '@/components/Sidebar'
 import { useState, useEffect, useCallback, useRef } from 'react'
 
 // sing-box 日志级别
@@ -80,9 +80,7 @@ export default function LogsPage() {
 
   // SSE 增量推送 — 独立 EventSource，直接追加增量；paused 用 ref 避免重连
   useEffect(() => {
-    const base = typeof window !== 'undefined'
-      ? (localStorage.getItem('apiUrl') || process.env.NEXT_PUBLIC_API || 'http://localhost:9092')
-      : ''
+    const base = typeof window !== 'undefined' ? getApiUrl() : ''
     const es = new EventSource(`${base}/api/events?types=logs`)
     es.addEventListener('logs', (e: MessageEvent) => {
       if (pausedRef.current) return

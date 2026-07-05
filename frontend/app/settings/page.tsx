@@ -1,12 +1,18 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { api } from '@/components/Sidebar'
+import { api, getApiUrl } from '@/components/Sidebar'
 
 export default function SettingsPage() {
-  const [apiUrl, setApiUrl] = useState(
-    typeof window !== 'undefined' ? localStorage.getItem('apiUrl') || 'http://localhost:9092' : 'http://localhost:9092'
-  )
+  const [apiUrl, setApiUrl] = useState('http://localhost:9092')
+  const [apiUrlReady, setApiUrlReady] = useState(false)
+
+  // SSR 阶段 window 不可用，useState 初始值固化为硬编码默认值。
+  // 客户端水合后通过 useEffect 更新为浏览器推导的真实地址。
+  useEffect(() => {
+    setApiUrl(getApiUrl())
+    setApiUrlReady(true)
+  }, [])
   const [geoInterval, setGeoInterval] = useState('off')
   const [geoLastUpdated, setGeoLastUpdated] = useState('')
   const [savingGeo, setSavingGeo] = useState(false)
@@ -34,9 +40,7 @@ export default function SettingsPage() {
 
   // SSE 订阅 rule_sets 事件，下载完成后实时刷新状态
   useEffect(() => {
-    const base = typeof window !== 'undefined'
-      ? (localStorage.getItem('apiUrl') || 'http://localhost:9092')
-      : ''
+    const base = typeof window !== 'undefined' ? getApiUrl() : ''
     const es = new EventSource(`${base}/api/events?types=rule_sets`)
     es.addEventListener('rule_sets', (e: MessageEvent) => {
       try {

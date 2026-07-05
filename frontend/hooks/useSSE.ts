@@ -1,14 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
-
-function getApiUrl() {
-  if (typeof window !== 'undefined') {
-    const stored = localStorage.getItem('apiUrl')
-    if (stored) return stored
-  }
-  return process.env.NEXT_PUBLIC_API || 'http://localhost:9092'
-}
+import { getApiUrl } from '@/lib/api'
 
 interface SSEData {
   status: any

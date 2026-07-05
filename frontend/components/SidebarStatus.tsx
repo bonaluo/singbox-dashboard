@@ -2,22 +2,9 @@
 
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
+import { getApiUrl } from '@/lib/api'
 
-function getApiUrl() {
-  if (typeof window !== 'undefined') {
-    const stored = localStorage.getItem('apiUrl')
-    if (stored) return stored
-  }
-  return process.env.NEXT_PUBLIC_API || 'http://localhost:9092'
-}
-
-export function api(endpoint: string, options?: RequestInit) {
-  const base = getApiUrl()
-  return fetch(`${base}${endpoint}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  }).then(r => r.json())
-}
+export { api } from '@/lib/api'
 
 // 全局通知：通过 window 属性跨 Next.js chunk 通信
 // 模块变量在 dev 模式下因代码分割而隔离，window 始终共享
