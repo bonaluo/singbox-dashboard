@@ -154,40 +154,75 @@ export default function RulesPage() {
     conditions: [{ type: formType, values: formValue.split(',').map((s: string) => s.trim()).filter(Boolean) }],
   })
 
-  // 检查重复规则
-  const isDuplicateRule = (type: string, value: string): boolean => {
-    if (editingId) return false // 编辑模式允许保留原值
-    const normVal = value.split(',').map(s => s.trim()).filter(Boolean).sort().join(',')
-    return rules.some(r => {
+  // 检查重复规则：完全匹配 + 值级重叠
+  // editingId 为当前编辑的规则 ID，跳过自身避免误报
+  const findDuplicateError = (type: string, value: string, skipId?: string): string | null => {
+    const newValues = value.split(',').map(s => s.trim()).filter(Boolean)
+    if (newValues.length === 0) return null
+
+    // 检查 1：完全匹配（相同 type + 完全相同值集合），排除自身
+    const normVal = [...newValues].sort().join(',')
+    const exactMatch = rules.some(r => {
+      if (skipId && r.id === skipId) return false
       const conds = r.conditions || []
       if (conds.length !== 1) return false
       const c = conds[0]
-      const existingVal = (c.values || []).sort().join(',')
-      return c.type === type && existingVal === normVal
+      if (c.type !== type) return false
+      const existingVal = [...(c.values || [])].sort().join(',')
+      return existingVal === normVal
     })
+    if (exactMatch) return '重复规则：匹配字段和匹配值完全相同的规则已存在'
+
+    // 检查 2：值级重叠（同类型下已有相同值），排除自身
+    const overlapping: string[] = []
+    for (const r of rules) {
+      if (skipId && r.id === skipId) continue
+      const conds = r.conditions || []
+      for (const c of conds) {
+        if (c.type !== type) continue
+        for (const nv of newValues) {
+          if ((c.values || []).includes(nv) && !overlapping.includes(nv)) {
+            overlapping.push(nv)
+          }
+        }
+      }
+    }
+    if (overlapping.length > 0) {
+      return `值冲突：以下值已存在于其他规则中: ${overlapping.join(', ')}`
+    }
+
+    return null
   }
 
   // 添加/更新规则
   const saveRule = async (overrides?: { outbound?: string }) => {
     if (!formValue) return
-    if (isDuplicateRule(formType, formValue)) {
-      setFormError('重复规则：匹配字段和匹配值完全相同的规则已存在')
+    const dupErr = findDuplicateError(formType, formValue, editingId ?? undefined)
+    if (dupErr) {
+      setFormError(dupErr)
       return
     }
     setLoading(true)
 
     const body = buildRuleBody(overrides)
+    let r
 
     if (editingId) {
-      await api(`/api/rules/${editingId}`, {
+      r = await api(`/api/rules/${editingId}`, {
         method: 'PUT',
         body: JSON.stringify({ ...body, id: editingId }),
       })
     } else {
-      await api('/api/rules', {
+      r = await api('/api/rules', {
         method: 'POST',
         body: JSON.stringify(body),
       })
+    }
+
+    if (!r.ok) {
+      setFormError(r.error || '操作失败')
+      setLoading(false)
+      return
     }
 
     resetForm()
@@ -199,24 +234,32 @@ export default function RulesPage() {
   // 添加并应用规则
   const saveAndApplyRule = async (overrides?: { outbound?: string }) => {
     if (!formValue) return
-    if (isDuplicateRule(formType, formValue)) {
-      setFormError('重复规则：匹配字段和匹配值完全相同的规则已存在')
+    const dupErr = findDuplicateError(formType, formValue, editingId ?? undefined)
+    if (dupErr) {
+      setFormError(dupErr)
       return
     }
     setLoading(true)
 
     const body = buildRuleBody(overrides)
+    let r
 
     if (editingId) {
-      await api(`/api/rules/${editingId}`, {
+      r = await api(`/api/rules/${editingId}`, {
         method: 'PUT',
         body: JSON.stringify({ ...body, id: editingId }),
       })
     } else {
-      await api('/api/rules', {
+      r = await api('/api/rules', {
         method: 'POST',
         body: JSON.stringify(body),
       })
+    }
+
+    if (!r.ok) {
+      setFormError(r.error || '操作失败')
+      setLoading(false)
+      return
     }
 
     resetForm()

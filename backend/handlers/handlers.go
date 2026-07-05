@@ -104,6 +104,16 @@ func sendError(w http.ResponseWriter, code int, msg string) {
 	sendJSON(w, code, models.APIResponse{OK: false, Error: msg})
 }
 
+// errorStatus 根据错误信息判断 HTTP 状态码
+// 重复/冲突类错误返回 409，其余返回 500
+func errorStatus(err error) int {
+	msg := err.Error()
+	if strings.Contains(msg, "重复") || strings.Contains(msg, "冲突") {
+		return 409
+	}
+	return 500
+}
+
 func readBody(r *http.Request) map[string]interface{} {
 	var body map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -299,7 +309,7 @@ func handleAddRule(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := services.AddRule(&rule)
 	if err != nil {
-		sendError(w, 500, err.Error())
+		sendError(w, errorStatus(err), err.Error())
 		return
 	}
 	sendOK(w, result)
@@ -314,7 +324,7 @@ func handleUpdateRule(w http.ResponseWriter, r *http.Request) {
 	}
 	rule.ID = id
 	if err := services.UpdateRule(&rule); err != nil {
-		sendError(w, 500, err.Error())
+		sendError(w, errorStatus(err), err.Error())
 		return
 	}
 	sendOK(w, map[string]string{"updated": id})

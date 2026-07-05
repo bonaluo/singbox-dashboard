@@ -57,9 +57,9 @@ func AddRule(r *models.Rule) (*models.Rule, error) {
 	if err != nil {
 		return nil, err
 	}
-	// 检查重复：匹配字段和匹配值完全相同的规则不允许重复添加
-	if isDuplicateRule(store, r) {
-		return nil, fmt.Errorf("重复规则：匹配字段和匹配值完全相同的规则已存在")
+	// 检查重复：完全匹配 + 值级重叠
+	if err := findDuplicateError(store, r, ""); err != nil {
+		return nil, err
 	}
 	r.ID = fmt.Sprintf("rule_%d", time.Now().UnixMilli())
 	// 自动分配 priority：已有最大 priority + 1
@@ -86,14 +86,9 @@ func UpdateRule(r *models.Rule) error {
 	if err != nil {
 		return err
 	}
-	// 检查重复：排除自身，匹配字段和匹配值相同的规则不允许
-	for _, existing := range store.Rules {
-		if existing.ID == r.ID {
-			continue // 跳过自身
-		}
-		if conditionsEqual(r.MigrateConditions(), existing.MigrateConditions()) {
-			return fmt.Errorf("重复规则：匹配字段和匹配值完全相同的规则已存在")
-		}
+	// 检查重复：完全匹配 + 值级重叠（排除自身）
+	if err := findDuplicateError(store, r, r.ID); err != nil {
+		return err
 	}
 	for i := range store.Rules {
 		if store.Rules[i].ID == r.ID {
@@ -526,21 +521,57 @@ func compileEmptyRuleSet(outputPath string) error {
 	return nil
 }
 
-// isDuplicateRule 检查新规则是否与已有规则重复
-// 重复判定：新规则的 conditions 与某条已有规则的 conditions 完全一致（类型+值均相同）
-func isDuplicateRule(store *models.RuleStore, newRule *models.Rule) bool {
-	newConds := newRule.MigrateConditions()
+// findDuplicateError 检查新规则是否与已有规则重复，返回具体错误
+// excludeID 用于更新时排除自身；空字符串表示不排除
+// 检测两个层面的重复：
+//  1. 完全匹配 —— 两个规则的所有 condition 完全一致
+//  2. 值级重叠 —— 同类型 condition 下有相同的值（如 domain_suffix: groq.com 已存在，
+//     再添加 domain_suffix: groq.com, qroq.io 会被拦截）
+func findDuplicateError(store *models.RuleStore, r *models.Rule, excludeID string) error {
+	newConds := r.MigrateConditions()
 	if len(newConds) == 0 {
-		return false
+		return nil
 	}
 
 	for _, existing := range store.Rules {
+		if excludeID != "" && existing.ID == excludeID {
+			continue
+		}
 		existingConds := existing.MigrateConditions()
+
+		// 检查 1：完全匹配
 		if conditionsEqual(newConds, existingConds) {
-			return true
+			return fmt.Errorf("重复规则：匹配字段和匹配值完全相同的规则已存在")
+		}
+
+		// 检查 2：值级重叠
+		overlapping := findOverlappingValues(newConds, existingConds)
+		if len(overlapping) > 0 {
+			return fmt.Errorf("值冲突：以下值已存在于其他规则中: %s",
+				strings.Join(overlapping, ", "))
 		}
 	}
-	return false
+	return nil
+}
+
+// findOverlappingValues 查找两组 condition 中同类型下的重复值
+func findOverlappingValues(a, b []models.RuleCondition) []string {
+	var overlaps []string
+	for _, condA := range a {
+		for _, condB := range b {
+			if condA.Type != condB.Type {
+				continue
+			}
+			for _, va := range condA.Values {
+				for _, vb := range condB.Values {
+					if va == vb {
+						overlaps = append(overlaps, va)
+					}
+				}
+			}
+		}
+	}
+	return overlaps
 }
 
 // conditionsEqual 比较两组条件是否完全一致（类型和值集合均相同，忽略顺序）
@@ -548,7 +579,6 @@ func conditionsEqual(a, b []models.RuleCondition) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	// 为每个条件构建 fingerprint: type + sorted values
 	buildFingerprints := func(conds []models.RuleCondition) map[string]bool {
 		fp := make(map[string]bool)
 		for _, c := range conds {
