@@ -1,7 +1,7 @@
 'use client'
 
 import { useSSE } from '@/hooks/useSSE'
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 
 interface Connection {
   id: string
@@ -57,11 +57,25 @@ const DEFAULT_COL_WIDTHS: Record<string, number> = {
 }
 const MIN_COL_WIDTH = 50
 
+// 可搜索的列定义
+const SEARCH_COLUMNS: { key: string; label: string }[] = [
+  { key: 'all', label: '所有列' },
+  { key: 'host', label: '目标' },
+  { key: 'network', label: '协议' },
+  { key: 'source', label: '源' },
+  { key: 'chain', label: '链路' },
+  { key: 'rule', label: '匹配规则' },
+]
+
 export default function ConnectionsPage() {
   const { connections: sseData } = useSSE(['connections'])
   const conns: Connection[] = sseData?.connections || []
   const [sortKey, setSortKey] = useState<string>('start')
   const [sortDir, setSortDir] = useState<1 | -1>(-1)
+
+  // ── 搜索状态 ──
+  const [searchText, setSearchText] = useState('')
+  const [searchColumn, setSearchColumn] = useState<string>('all')
 
   // ── 列宽拖拽调整 ──
   const [colWidths, setColWidths] = useState(DEFAULT_COL_WIDTHS)
@@ -102,6 +116,58 @@ export default function ConnectionsPage() {
     }
   }, [resizing])
 
+  // ── 获取某行某列的搜索文本 ──
+  const getCellSearchText = useCallback((c: Connection, col: string): string => {
+    const meta: any = c.metadata || {}
+    switch (col) {
+      case 'host':
+        const host = meta.host || ''
+        const dstIP = meta.destinationIP || meta.destination_ip || ''
+        const dstPort = meta.destinationPort || meta.destination_port || ''
+        const dst = dstIP ? `${dstIP}:${dstPort}` : ''
+        return `${host} ${dst}`
+      case 'network':
+        return meta.network || meta.type || ''
+      case 'source':
+        const srcIP = meta.sourceIP || meta.source_ip || ''
+        const srcPort = meta.sourcePort || meta.source_port || ''
+        return srcIP ? `${srcIP}:${srcPort}` : ''
+      case 'chain':
+        return [...(c.chains || [])].reverse().join(' → ') || ''
+      case 'rule':
+        return c.rulePayload || c.rule_payload || c.rule || ''
+      default:
+        return ''
+    }
+  }, [])
+
+  // ── 所有列的搜索文本（用于 "所有列" 搜索）──
+  const getAllSearchText = useCallback((c: Connection): string => {
+    const parts: string[] = []
+    for (const sc of SEARCH_COLUMNS) {
+      if (sc.key === 'all') continue
+      parts.push(getCellSearchText(c, sc.key))
+    }
+    // 加入上传/下载/持续时间
+    parts.push(fmtBytes(c.upload))
+    parts.push(fmtBytes(c.download))
+    parts.push(fmtDuration(c.start))
+    return parts.join(' ')
+  }, [getCellSearchText])
+
+  // ── 过滤 ──
+  const filtered = useMemo(() => {
+    if (!searchText.trim()) return conns
+
+    const query = searchText.toLowerCase().trim()
+    return conns.filter(c => {
+      if (searchColumn === 'all') {
+        return getAllSearchText(c).toLowerCase().includes(query)
+      }
+      return getCellSearchText(c, searchColumn).toLowerCase().includes(query)
+    })
+  }, [conns, searchText, searchColumn, getCellSearchText, getAllSearchText])
+
   // ── 排序 ──
 
   const toggleSort = (key: string) => {
@@ -113,7 +179,7 @@ export default function ConnectionsPage() {
     }
   }
 
-  const sorted = [...conns].sort((a, b) => {
+  const sorted = [...filtered].sort((a, b) => {
     let va: any, vb: any
     switch (sortKey) {
       case 'host':
@@ -177,7 +243,7 @@ export default function ConnectionsPage() {
   const Th = ({ col, label }: { col: string; label: string }) => (
     <th
       onClick={() => toggleSort(col)}
-      className="text-left text-xs text-gray-400 py-2 px-3 cursor-pointer select-none hover:text-gray-200 transition-colors whitespace-nowrap relative"
+      className="text-left text-xs text-gray-400 py-2 px-3 cursor-pointer select-none hover:text-gray-200 transition-colors whitespace-nowrap relative border-r border-[var(--border)]"
       style={{ width: colWidths[col] }}
     >
       {label}
@@ -185,6 +251,9 @@ export default function ConnectionsPage() {
       <ResizeHandle col={col} />
     </th>
   )
+
+  // ── 列键列表（按表头顺序）──
+  const colKeys = ['host', 'network', 'source', 'chain', 'rule', 'upload', 'download', 'duration']
 
   // ── 渲染 ──
 
@@ -202,19 +271,70 @@ export default function ConnectionsPage() {
         </div>
       </div>
 
+      {/* ── 搜索栏 ── */}
+      <div className="flex items-center gap-2 mb-3">
+        <div className="relative flex-1 max-w-md">
+          <svg
+            className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input
+            type="text"
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            placeholder="搜索连接..."
+            className="w-full pl-9 pr-3 py-1.5 text-sm bg-[var(--surface)] border border-[var(--border)] rounded-lg text-gray-200 placeholder-gray-500 focus:outline-none focus:border-[var(--accent)]/60 transition-colors"
+          />
+          {searchText && (
+            <button
+              onClick={() => setSearchText('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+        </div>
+        <select
+          value={searchColumn}
+          onChange={(e) => setSearchColumn(e.target.value)}
+          className="text-sm bg-[var(--surface)] border border-[var(--border)] rounded-lg text-gray-300 px-2 py-1.5 focus:outline-none focus:border-[var(--accent)]/60 transition-colors"
+        >
+          {SEARCH_COLUMNS.map(sc => (
+            <option key={sc.key} value={sc.key}>{sc.label}</option>
+          ))}
+        </select>
+        {searchText && (
+          <span className="text-xs text-gray-500">
+            {filtered.length} / {conns.length} 条
+          </span>
+        )}
+      </div>
+
+      {filtered.length === 0 && conns.length > 0 && searchText && (
+        <div className="bg-[var(--surface)] rounded-xl p-12 border border-[var(--border)] text-center text-gray-500 text-sm">
+          没有匹配 "{searchText}" 的连接
+        </div>
+      )}
+
       {conns.length === 0 && (
         <div className="bg-[var(--surface)] rounded-xl p-12 border border-[var(--border)] text-center text-gray-500 text-sm">
           暂无活动连接
         </div>
       )}
 
-      {conns.length > 0 && (
+      {filtered.length > 0 && (
         <div className="bg-[var(--surface)] rounded-xl border border-[var(--border)] overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm table-fixed" style={{ minWidth: Object.values(colWidths).reduce((a, b) => a + b, 0) }}>
               <colgroup>
-                {Object.entries(colWidths).map(([key, w]) => (
-                  <col key={key} style={{ width: w }} />
+                {colKeys.map((key) => (
+                  <col key={key} style={{ width: colWidths[key] }} />
                 ))}
               </colgroup>
               <thead>
@@ -222,7 +342,7 @@ export default function ConnectionsPage() {
                   <Th col="host" label="目标" />
                   <Th col="network" label="协议" />
                   <th
-                    className="text-left text-xs text-gray-400 py-2 px-3 whitespace-nowrap relative"
+                    className="text-left text-xs text-gray-400 py-2 px-3 whitespace-nowrap relative border-r border-[var(--border)]"
                     style={{ width: colWidths.source }}
                   >
                     源
@@ -232,11 +352,20 @@ export default function ConnectionsPage() {
                   <Th col="rule" label="匹配规则" />
                   <Th col="upload" label="上传" />
                   <Th col="download" label="下载" />
-                  <Th col="duration" label="持续时间" />
+                  {/* 最后一列不加右边框 */}
+                  <th
+                    onClick={() => toggleSort('duration')}
+                    className="text-left text-xs text-gray-400 py-2 px-3 cursor-pointer select-none hover:text-gray-200 transition-colors whitespace-nowrap relative"
+                    style={{ width: colWidths.duration }}
+                  >
+                    持续时间
+                    <SortArrow col="duration" />
+                    <ResizeHandle col="duration" />
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {sorted.map(c => {
+                {sorted.map((c, rowIdx) => {
                   const meta: any = c.metadata || {}
                   const host = meta.host || '-'
                   const network = meta.network || meta.type || '-'
@@ -251,29 +380,23 @@ export default function ConnectionsPage() {
                   const chains = [...(c.chains || [])].reverse().join(' → ') || '-'
                   const rule = c.rulePayload || c.rule_payload || c.rule || '-'
 
+                  const isLastRow = rowIdx === sorted.length - 1
+
                   return (
-                    <tr key={c.id} className="border-b border-[var(--border)]/50 hover:bg-[var(--surface-hover)]/50 transition-colors">
+                    <tr key={c.id} className={`${isLastRow ? '' : 'border-b border-[var(--border)]/50'} hover:bg-[var(--surface-hover)]/50 transition-colors`}>
                       {/* 目标 */}
-                      <td className="py-2 px-3">
-                        <div
-                          className="text-gray-200 truncate"
-                          style={{ maxWidth: colWidths.host - 24 }}
-                          title={host}
-                        >
+                      <td className="py-2 px-3 border-r border-[var(--border)]/50">
+                        <div className="text-gray-200 truncate" title={host}>
                           {host}
                         </div>
                         {dst && (
-                          <div
-                            className="text-xs text-gray-500 truncate"
-                            style={{ maxWidth: colWidths.host - 24 }}
-                            title={dst}
-                          >
+                          <div className="text-xs text-gray-500 truncate" title={dst}>
                             {dst}
                           </div>
                         )}
                       </td>
                       {/* 协议 */}
-                      <td className="py-2 px-3">
+                      <td className="py-2 px-3 border-r border-[var(--border)]/50">
                         <span className={`text-xs px-1.5 py-0.5 rounded whitespace-nowrap ${
                           network === 'tcp' ? 'bg-blue-500/20 text-blue-400' :
                           network === 'udp' ? 'bg-green-500/20 text-green-400' :
@@ -283,41 +406,29 @@ export default function ConnectionsPage() {
                         </span>
                       </td>
                       {/* 源 */}
-                      <td className="py-2 px-3">
-                        <div
-                          className="text-xs text-gray-400 font-mono truncate"
-                          style={{ maxWidth: colWidths.source - 24 }}
-                          title={src}
-                        >
+                      <td className="py-2 px-3 border-r border-[var(--border)]/50">
+                        <div className="text-xs text-gray-400 font-mono truncate" title={src}>
                           {src}
                         </div>
                       </td>
                       {/* 链路 */}
-                      <td className="py-2 px-3">
-                        <div
-                          className="text-xs text-gray-400 truncate"
-                          style={{ maxWidth: colWidths.chain - 24 }}
-                          title={`链路: ${chains}`}
-                        >
+                      <td className="py-2 px-3 border-r border-[var(--border)]/50">
+                        <div className="text-xs text-gray-400 truncate" title={`链路: ${chains}`}>
                           {chains}
                         </div>
                       </td>
                       {/* 匹配规则 */}
-                      <td className="py-2 px-3">
-                        <div
-                          className="text-xs text-yellow-400 truncate"
-                          style={{ maxWidth: colWidths.rule - 24 }}
-                          title={rule}
-                        >
+                      <td className="py-2 px-3 border-r border-[var(--border)]/50">
+                        <div className="text-xs text-yellow-400 truncate" title={rule}>
                           {rule}
                         </div>
                       </td>
                       {/* 上传 */}
-                      <td className="py-2 px-3 text-xs text-orange-400 font-mono whitespace-nowrap">
+                      <td className="py-2 px-3 text-xs text-orange-400 font-mono whitespace-nowrap border-r border-[var(--border)]/50">
                         {fmtBytes(c.upload)}
                       </td>
                       {/* 下载 */}
-                      <td className="py-2 px-3 text-xs text-cyan-400 font-mono whitespace-nowrap">
+                      <td className="py-2 px-3 text-xs text-cyan-400 font-mono whitespace-nowrap border-r border-[var(--border)]/50">
                         {fmtBytes(c.download)}
                       </td>
                       {/* 持续时间 */}
