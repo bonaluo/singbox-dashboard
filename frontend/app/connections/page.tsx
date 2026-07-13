@@ -35,6 +35,13 @@ function fmtBytes(n: number) {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`
 }
 
+function fmtSpeed(bytesPerSec: number) {
+  if (!bytesPerSec || bytesPerSec < 0) return '0 B/s'
+  if (bytesPerSec < 1024) return `${Math.round(bytesPerSec)} B/s`
+  if (bytesPerSec < 1024 * 1024) return `${(bytesPerSec / 1024).toFixed(1)} KB/s`
+  return `${(bytesPerSec / (1024 * 1024)).toFixed(1)} MB/s`
+}
+
 function fmtDuration(start: string) {
   if (!start) return '-'
   const ms = Date.now() - new Date(start).getTime()
@@ -53,6 +60,8 @@ const DEFAULT_COL_WIDTHS: Record<string, number> = {
   rule: 180,
   upload: 80,
   download: 80,
+  upload_speed: 90,
+  download_speed: 90,
   duration: 90,
 }
 const MIN_COL_WIDTH = 50
@@ -116,6 +125,43 @@ export default function ConnectionsPage() {
     }
   }, [resizing])
 
+  // ── 速度计算 ──
+  // 根据两次 SSE 推送之间的数据差计算实时速率（bytes/s）
+  const prevSnapshotRef = useRef<{
+    data: Map<string, { upload: number; download: number }>
+    timestamp: number
+  }>({ data: new Map(), timestamp: Date.now() })
+
+  const speeds = useMemo(() => {
+    const now = Date.now()
+    const elapsed = (now - prevSnapshotRef.current.timestamp) / 1000
+    const prev = prevSnapshotRef.current.data
+
+    const result = new Map<string, { uploadSpeed: number; downloadSpeed: number }>()
+
+    for (const c of conns) {
+      const prevData = prev.get(c.id)
+      if (prevData && elapsed > 0 && elapsed < 30) {
+        result.set(c.id, {
+          uploadSpeed: Math.max(0, (c.upload - prevData.upload) / elapsed),
+          downloadSpeed: Math.max(0, (c.download - prevData.download) / elapsed),
+        })
+      } else {
+        // 新连接或间隔过长，显示当前速率（下次有历史数据后会更新）
+        result.set(c.id, { uploadSpeed: 0, downloadSpeed: 0 })
+      }
+    }
+
+    // 更新 ref 供下次计算
+    const newData = new Map<string, { upload: number; download: number }>()
+    for (const c of conns) {
+      newData.set(c.id, { upload: c.upload, download: c.download })
+    }
+    prevSnapshotRef.current = { data: newData, timestamp: now }
+
+    return result
+  }, [conns])
+
   // ── 获取某行某列的搜索文本 ──
   const getCellSearchText = useCallback((c: Connection, col: string): string => {
     const meta: any = c.metadata || {}
@@ -148,12 +194,17 @@ export default function ConnectionsPage() {
       if (sc.key === 'all') continue
       parts.push(getCellSearchText(c, sc.key))
     }
-    // 加入上传/下载/持续时间
+    // 加入上传/下载/速度/持续时间
+    const s = speeds.get(c.id)
     parts.push(fmtBytes(c.upload))
     parts.push(fmtBytes(c.download))
+    if (s) {
+      parts.push(fmtSpeed(s.uploadSpeed))
+      parts.push(fmtSpeed(s.downloadSpeed))
+    }
     parts.push(fmtDuration(c.start))
     return parts.join(' ')
-  }, [getCellSearchText])
+  }, [getCellSearchText, speeds])
 
   // ── 过滤 ──
   const filtered = useMemo(() => {
@@ -198,6 +249,20 @@ export default function ConnectionsPage() {
         va = a.download || 0
         vb = b.download || 0
         break
+      case 'upload_speed': {
+        const sa = speeds.get(a.id)
+        const sb = speeds.get(b.id)
+        va = sa ? sa.uploadSpeed : 0
+        vb = sb ? sb.uploadSpeed : 0
+        break
+      }
+      case 'download_speed': {
+        const sa = speeds.get(a.id)
+        const sb = speeds.get(b.id)
+        va = sa ? sa.downloadSpeed : 0
+        vb = sb ? sb.downloadSpeed : 0
+        break
+      }
       case 'rule':
         va = a.rule || ''
         vb = b.rule || ''
@@ -253,7 +318,7 @@ export default function ConnectionsPage() {
   )
 
   // ── 列键列表（按表头顺序）──
-  const colKeys = ['host', 'network', 'source', 'chain', 'rule', 'upload', 'download', 'duration']
+  const colKeys = ['host', 'network', 'source', 'chain', 'rule', 'upload', 'download', 'upload_speed', 'download_speed', 'duration']
 
   // ── 渲染 ──
 
@@ -352,6 +417,8 @@ export default function ConnectionsPage() {
                   <Th col="rule" label="匹配规则" />
                   <Th col="upload" label="上传" />
                   <Th col="download" label="下载" />
+                  <Th col="upload_speed" label="上传速度" />
+                  <Th col="download_speed" label="下载速度" />
                   {/* 最后一列不加右边框 */}
                   <th
                     onClick={() => toggleSort('duration')}
@@ -379,6 +446,9 @@ export default function ConnectionsPage() {
                   // 反转后显示为 "proxy → HK香港-01" 更符合路由流向的直觉
                   const chains = [...(c.chains || [])].reverse().join(' → ') || '-'
                   const rule = c.rulePayload || c.rule_payload || c.rule || '-'
+                  const s = speeds.get(c.id)
+                  const upSpeed = s ? fmtSpeed(s.uploadSpeed) : '-'
+                  const downSpeed = s ? fmtSpeed(s.downloadSpeed) : '-'
 
                   const isLastRow = rowIdx === sorted.length - 1
 
@@ -430,6 +500,14 @@ export default function ConnectionsPage() {
                       {/* 下载 */}
                       <td className="py-2 px-3 text-xs text-cyan-400 font-mono whitespace-nowrap border-r border-[var(--border)]/50">
                         {fmtBytes(c.download)}
+                      </td>
+                      {/* 上传速度 */}
+                      <td className="py-2 px-3 text-xs text-orange-400/70 font-mono whitespace-nowrap border-r border-[var(--border)]/50">
+                        {upSpeed}
+                      </td>
+                      {/* 下载速度 */}
+                      <td className="py-2 px-3 text-xs text-cyan-400/70 font-mono whitespace-nowrap border-r border-[var(--border)]/50">
+                        {downSpeed}
                       </td>
                       {/* 持续时间 */}
                       <td className="py-2 px-3 text-xs text-gray-400 font-mono whitespace-nowrap">
