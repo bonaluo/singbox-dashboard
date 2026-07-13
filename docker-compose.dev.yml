@@ -20,8 +20,6 @@ services:
         SINGBOX_IMAGE: ${SINGBOX_IMAGE:-ghcr.io/sagernet/sing-box:v1.13.12}
     image: ${BACKEND_IMAGE:-singbox-dashboard-backend}:${BUILD_DATE:-local}
     container_name: ${BACKEND_CONTAINER:-singbox-backend-dev}
-    extra_hosts:
-      - "asus-qwertyuiop.dynv6.net:10.31.3.87"
     network_mode: bridge
     volumes:
       - ${DATA_DIR:-./data}:/data
