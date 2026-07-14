@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '@/components/Sidebar'
 import OutboundSelectorModal from '@/components/OutboundSelectorModal'
 import NodeTestModal from '@/components/NodeTestModal'
@@ -90,6 +90,15 @@ const ACTIONS = [
   { value: 'sniff', label: 'sniff - 仅协议嗅探' },
 ]
 
+// ── 搜索列定义 ──
+const SEARCH_COLUMNS: { key: string; label: string }[] = [
+  { key: 'all', label: '所有字段' },
+  { key: 'type', label: '匹配字段' },
+  { key: 'value', label: '匹配值' },
+  { key: 'outbound', label: '动作/出站' },
+  { key: 'comment', label: '备注' },
+]
+
 // ── 出站选择组件（使用 OutboundSelectorModal 弹窗） ──
 
 // 已迁移到 components/OutboundSelectorModal.tsx 使用模态弹窗选择
@@ -115,6 +124,10 @@ export default function RulesPage() {
   const [formComment, setFormComment] = useState('')
   const [formError, setFormError] = useState('')
   const [showTestModal, setShowTestModal] = useState(false)
+
+  // 搜索状态
+  const [searchText, setSearchText] = useState('')
+  const [searchColumn, setSearchColumn] = useState<string>('all')
 
   // 可测试的节点（非组、非 direct 的独立节点）
   const testableNodes = outbounds.filter(
@@ -375,6 +388,70 @@ export default function RulesPage() {
     return type
   }
 
+  // 获取某条规则的搜索文本
+  const getRuleSearchText = useCallback((rule: any, col: string): string => {
+    const conds = rule.conditions || []
+    switch (col) {
+      case 'type': {
+        // 搜索匹配字段类型
+        const typeParts: string[] = []
+        for (const c of conds) {
+          const label = findLabel(c.type || '')
+          typeParts.push(`${c.type} ${label}`)
+        }
+        if (typeParts.length === 0 && rule.type) {
+          const label = findLabel(rule.type)
+          typeParts.push(`${rule.type} ${label}`)
+        }
+        return typeParts.join(' ')
+      }
+      case 'value': {
+        // 搜索匹配值
+        const valueParts: string[] = []
+        for (const c of conds) {
+          valueParts.push((c.values || []).join(' '))
+        }
+        if (valueParts.length === 0 && rule.value) {
+          valueParts.push(rule.value)
+        }
+        return valueParts.join(' ')
+      }
+      case 'outbound': {
+        // 搜索动作 + 出站
+        const action = rule.action && rule.action !== 'route' ? rule.action : ''
+        const outbound = rule.outbound || ''
+        return `${action} ${outbound}`
+      }
+      case 'comment':
+        return rule.comment || ''
+      default:
+        return ''
+    }
+  }, [])
+
+  // 获取规则的所有搜索文本（用于 "所有字段" 搜索）
+  const getAllRuleSearchText = useCallback((rule: any): string => {
+    const parts: string[] = []
+    for (const sc of SEARCH_COLUMNS) {
+      if (sc.key === 'all') continue
+      parts.push(getRuleSearchText(rule, sc.key))
+    }
+    return parts.join(' ')
+  }, [getRuleSearchText])
+
+  // 过滤后的规则列表
+  const filteredRules = useMemo(() => {
+    if (!searchText.trim()) return rules
+
+    const query = searchText.toLowerCase().trim()
+    return rules.filter(rule => {
+      if (searchColumn === 'all') {
+        return getAllRuleSearchText(rule).toLowerCase().includes(query)
+      }
+      return getRuleSearchText(rule, searchColumn).toLowerCase().includes(query)
+    })
+  }, [rules, searchText, searchColumn, getRuleSearchText, getAllRuleSearchText])
+
   return (
     <div className="max-w-5xl">
       {/* 顶部工具栏 */}
@@ -405,6 +482,51 @@ export default function RulesPage() {
             {loading ? '应用中...' : '应用规则'}
           </button>
         </div>
+      </div>
+
+      {/* ── 搜索栏 ── */}
+      <div className="flex items-center gap-2 mb-3">
+        <div className="relative flex-1 max-w-md">
+          <svg
+            className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input
+            type="text"
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            placeholder="搜索规则..."
+            className="w-full pl-9 pr-3 py-1.5 text-sm bg-[var(--surface)] border border-[var(--border)] rounded-lg text-gray-200 placeholder-gray-500 focus:outline-none focus:border-[var(--accent)]/60 transition-colors"
+          />
+          {searchText && (
+            <button
+              onClick={() => setSearchText('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+        </div>
+        <select
+          value={searchColumn}
+          onChange={(e) => setSearchColumn(e.target.value)}
+          className="text-sm bg-[var(--surface)] border border-[var(--border)] rounded-lg text-gray-300 px-2 py-1.5 focus:outline-none focus:border-[var(--accent)]/60 transition-colors"
+        >
+          {SEARCH_COLUMNS.map(sc => (
+            <option key={sc.key} value={sc.key}>{sc.label}</option>
+          ))}
+        </select>
+        {searchText && (
+          <span className="text-xs text-gray-500 whitespace-nowrap">
+            {filteredRules.length} / {rules.length} 条
+          </span>
+        )}
       </div>
 
       {/* 添加/编辑表单 */}
@@ -559,7 +681,15 @@ export default function RulesPage() {
             暂无规则，点击「+ 添加规则」创建路由规则
           </div>
         )}
-        {rules.map((rule, i) => {
+        {filteredRules.length === 0 && rules.length > 0 && searchText && (
+          <div className="text-gray-500 text-sm py-12 text-center bg-[var(--surface)] rounded-xl border border-[var(--border)]">
+            没有匹配 "{searchText}" 的规则
+          </div>
+        )}
+        {filteredRules.map((rule) => {
+          // 原始索引（在完整 rules 数组中的位置）
+          const origIndex = rules.findIndex((r: any) => r.id === rule.id)
+
           // 获取条件摘要
           const conds = rule.conditions || []
           let typeLabel: string
@@ -587,17 +717,17 @@ export default function RulesPage() {
             ? 'bg-blue-500/20 text-blue-400'
             : 'bg-[var(--accent)]/20 text-[var(--accent)]'
 
-          const isDragging = dragIndex === i
-          const isDragOver = dragOverIndex === i && dragIndex !== i
+          const isDragging = dragIndex === origIndex
+          const isDragOver = dragOverIndex === origIndex && dragIndex !== origIndex
 
           return (
             <div
               key={rule.id}
               draggable
-              onDragStart={() => handleDragStart(i)}
-              onDragOver={(e) => handleDragOver(e, i)}
+              onDragStart={() => handleDragStart(origIndex)}
+              onDragOver={(e) => handleDragOver(e, origIndex)}
               onDragEnd={handleDragEnd}
-              onDrop={() => handleDrop(i)}
+              onDrop={() => handleDrop(origIndex)}
               className={`flex items-center gap-2 bg-[var(--surface)] rounded-xl p-3 border transition-all ${
                 isDragging ? 'opacity-40 scale-95' : ''
               } ${isDragOver ? 'border-[var(--accent)] bg-[var(--accent)]/5' : 'border-[var(--border)]'} ${
@@ -609,21 +739,21 @@ export default function RulesPage() {
                 ⋮⋮
               </span>
 
-              <span className="text-xs text-gray-500 w-5 text-right">{i + 1}</span>
+              <span className="text-xs text-gray-500 w-5 text-right">{origIndex + 1}</span>
 
               {/* 排序按钮 */}
               <div className="flex flex-col shrink-0 gap-px">
                 <button
-                  onClick={() => moveRule(i, 'up')}
-                  disabled={i === 0}
+                  onClick={() => moveRule(origIndex, 'up')}
+                  disabled={origIndex === 0}
                   className="text-gray-500 hover:text-gray-300 disabled:opacity-20 disabled:cursor-default transition-colors leading-none text-xs"
                   title="上移"
                 >
                   ▲
                 </button>
                 <button
-                  onClick={() => moveRule(i, 'down')}
-                  disabled={i === rules.length - 1}
+                  onClick={() => moveRule(origIndex, 'down')}
+                  disabled={origIndex === rules.length - 1}
                   className="text-gray-500 hover:text-gray-300 disabled:opacity-20 disabled:cursor-default transition-colors leading-none text-xs"
                   title="下移"
                 >
