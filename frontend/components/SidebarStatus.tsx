@@ -71,6 +71,11 @@ export default function SidebarStatus() {
     return () => clearInterval(poll)
   }, [])
 
+  // 版本号拼接前端构建时间，方便确认部署是否生效
+  const displayVersion = process.env.NEXT_PUBLIC_BUILD_DATE && process.env.NEXT_PUBLIC_BUILD_DATE !== 'unknown'
+    ? `${version}  ⌂${process.env.NEXT_PUBLIC_BUILD_DATE}`
+    : version
+
   if (!mounted) return null
   const slot = document.getElementById('sidebar-status-slot')
   const infoSlot = document.getElementById('sidebar-status-info-slot')
@@ -94,7 +99,7 @@ export default function SidebarStatus() {
         infoSlot
       )}
       {verSlot && createPortal(
-        <span>{version}</span>,
+        <span title={`后端: ${version}  |  前端构建: ${process.env.NEXT_PUBLIC_BUILD_DATE || 'unknown'}`}>{displayVersion}</span>,
         verSlot
       )}
     </>

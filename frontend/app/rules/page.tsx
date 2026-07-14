@@ -283,16 +283,14 @@ export default function RulesPage() {
     setLoading(false)
   }
 
-  // 测试模态框回调：从 NodeTestModal 选择节点后，设置出站并保存
+  // 测试模态框回调：从 NodeTestModal 保存节点，不关闭弹窗
   const handleTestModalAdd = async (tag: string) => {
     setFormOutbound(tag)
-    setShowTestModal(false)
     await saveRule({ outbound: tag })
   }
 
   const handleTestModalAddAndApply = async (tag: string) => {
     setFormOutbound(tag)
-    setShowTestModal(false)
     await saveAndApplyRule({ outbound: tag })
   }
 

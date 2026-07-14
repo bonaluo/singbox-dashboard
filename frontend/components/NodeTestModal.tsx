@@ -30,6 +30,64 @@ interface SSEEvent {
   error?: string
 }
 
+// 缓存数据结构：保存上一次的测试配置和结果
+interface NodeTestCache {
+  config: {
+    testLatency: boolean
+    testDownload: boolean
+    concurrency: number
+    latencyUrl: string
+    downloadUrl: string
+    useSuggestedDomain: boolean
+  }
+  results: Array<{
+    tag: string
+    latency: number
+    downloadSpeed: number
+    latencyStatus: 'pending' | 'testing' | 'done'
+    downloadStatus: 'pending' | 'testing' | 'done'
+  }>
+  nodes: string[]  // 用于校验缓存的节点列表是否与当前匹配
+}
+
+const CACHE_KEY = 'nodeTestCache'
+
+// 从 localStorage 加载缓存
+function loadCache(): NodeTestCache | null {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY)
+    if (!raw) return null
+    return JSON.parse(raw) as NodeTestCache
+  } catch {
+    return null
+  }
+}
+
+// 保存缓存到 localStorage
+function saveCache(cache: NodeTestCache) {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify(cache))
+  } catch { /* 忽略存储满等错误 */ }
+}
+
+// 清除缓存
+function clearCache() {
+  try {
+    localStorage.removeItem(CACHE_KEY)
+  } catch { /* ignore */ }
+}
+
+// 验证并加载缓存（返回 null 表示无有效缓存）
+function loadValidCache(currentNodes: string[]): NodeTestCache | null {
+  const cache = loadCache()
+  if (!cache) return null
+  const currentTags = new Set(currentNodes)
+  const cachedTags = new Set(cache.nodes)
+  const match = currentTags.size === cachedTags.size && Array.from(currentTags).every(t => cachedTags.has(t))
+  if (!match) { clearCache(); return null }
+  return cache
+}
+
 export default function NodeTestModal({
   nodes,
   onSelect,
@@ -65,9 +123,10 @@ export default function NodeTestModal({
   const [selectedTag, setSelectedTag] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [adding, setAdding] = useState(false)
+  const [saved, setSaved] = useState(false) // 保存成功提示
   const abortRef = useRef<AbortController | null>(null)
 
-  // Reset results when test config changes
+  // Reset results on mount only（避免 nodes 引用变化导致运行时清空选中状态）
   const resetResults = useCallback(() => {
     const map = new Map<string, NodeTestResult>()
     nodes.forEach(n => {
@@ -85,7 +144,14 @@ export default function NodeTestModal({
     setError('')
   }, [nodes])
 
-  useEffect(() => { resetResults() }, [resetResults])
+  // 仅在挂载时执行初始 reset，不响应 nodes 引用变化
+  const didMountRef = useRef(false)
+  useEffect(() => {
+    if (!didMountRef.current) {
+      didMountRef.current = true
+      resetResults()
+    }
+  }, [resetResults])
 
   // 勾选"使用当前规则域名"时自动填充 URL
   useEffect(() => {
@@ -98,6 +164,40 @@ export default function NodeTestModal({
       setDownloadUrl('')
     }
   }, [useSuggestedDomain, suggestedDomain])
+
+  // 从缓存恢复上一次的测试配置和结果（供 useEffect 和按钮共用）
+  const restoreCachedResults = useCallback(() => {
+    const cache = loadValidCache(nodes.map(n => n.tag))
+    if (!cache) return false
+
+    setTestLatency(cache.config.testLatency)
+    setTestDownload(cache.config.testDownload)
+    setConcurrency(cache.config.concurrency)
+    setLatencyUrl(cache.config.latencyUrl)
+    setDownloadUrl(cache.config.downloadUrl)
+    setUseSuggestedDomain(cache.config.useSuggestedDomain)
+
+    const map = new Map<string, NodeTestResult>()
+    cache.results.forEach(r => {
+      map.set(r.tag, { tag: r.tag, latency: r.latency, downloadSpeed: r.downloadSpeed, latencyStatus: r.latencyStatus, downloadStatus: r.downloadStatus })
+    })
+    setResults(map)
+    setTestDone(true)
+
+    if (!cache.config.testLatency || !cache.config.testDownload) {
+      const key = cache.config.testLatency ? 'latency' : 'download'
+      let bestTag = ''; let bestVal = Infinity
+      map.forEach((r) => {
+        if (key === 'latency') { if (r.latency > 0 && r.latency < bestVal) { bestVal = r.latency; bestTag = r.tag } }
+        else { if (r.downloadSpeed > 0 && r.downloadSpeed > bestVal) { bestVal = r.downloadSpeed; bestTag = r.tag } }
+      })
+      if (bestTag) { setSelectedTag(bestTag); onSelect(bestTag) }
+    }
+    return true
+  }, [nodes, onSelect])
+
+  // 首次挂载时自动恢复缓存
+  useEffect(() => { restoreCachedResults() }, [])
 
   // Start testing
   const startTest = async () => {
@@ -196,6 +296,7 @@ export default function NodeTestModal({
       // Ensure testDone is set when stream ends successfully
       setTestDone(true)
       // Auto-select if only one test type
+      let autoTag = ''
       setResults(prev => {
         if (!testLatency || !testDownload) {
           const key = testLatency ? 'latency' : 'download'
@@ -216,10 +317,17 @@ export default function NodeTestModal({
               }
             })
           }
-          if (bestTag) setSelectedTag(bestTag)
+          autoTag = bestTag
         }
+        // 保存缓存（兜底：SSE complete 事件可能已保存，这里再确认一次）
+        saveCache({
+          config: { testLatency, testDownload, concurrency, latencyUrl, downloadUrl, useSuggestedDomain },
+          results: Array.from(prev.values()),
+          nodes: nodes.map(n => n.tag),
+        })
         return prev
       })
+      if (autoTag) { setSelectedTag(autoTag); onSelect(autoTag) }
     } catch (err: any) {
       if (err.name !== 'AbortError') {
         setError(err.message || '测试失败')
@@ -236,6 +344,7 @@ export default function NodeTestModal({
     if (evt.type === 'complete') {
       setTestDone(true)
       // Auto-select best node if only one test type
+      let autoTag = ''
       setResults(prev => {
         if (!testLatency || !testDownload) {
           const key = testLatency ? 'latency' : 'download'
@@ -256,10 +365,17 @@ export default function NodeTestModal({
               }
             })
           }
-          if (bestTag) setSelectedTag(bestTag)
+          autoTag = bestTag
         }
+        // 保存缓存
+        saveCache({
+          config: { testLatency, testDownload, concurrency, latencyUrl, downloadUrl, useSuggestedDomain },
+          results: Array.from(prev.values()),
+          nodes: nodes.map(n => n.tag),
+        })
         return prev
       })
+      if (autoTag) { setSelectedTag(autoTag); onSelect(autoTag) }
       return
     }
 
@@ -429,14 +545,26 @@ export default function NodeTestModal({
   const handleAdd = async () => {
     if (!selectedTag || adding) return
     setAdding(true)
-    await onAdd(selectedTag)
+    try {
+      await onAdd(selectedTag)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } catch {
+      // error handled by parent
+    }
     setAdding(false)
   }
 
   const handleAddAndApply = async () => {
     if (!selectedTag || adding) return
     setAdding(true)
-    await onAddAndApply(selectedTag)
+    try {
+      await onAddAndApply(selectedTag)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } catch {
+      // error handled by parent
+    }
     setAdding(false)
   }
 
@@ -562,13 +690,24 @@ export default function NodeTestModal({
               </div>
 
               {/* Start button */}
-              <button
-                onClick={startTest}
-                disabled={(!testLatency && !testDownload) || nodes.length === 0}
-                className="bg-[var(--accent)] text-white px-6 py-2.5 rounded-lg text-sm hover:opacity-90 disabled:opacity-50 transition-opacity font-medium"
-              >
-                🚀 开始测试
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={startTest}
+                  disabled={(!testLatency && !testDownload) || nodes.length === 0}
+                  className="bg-[var(--accent)] text-white px-6 py-2.5 rounded-lg text-sm hover:opacity-90 disabled:opacity-50 transition-opacity font-medium"
+                >
+                  🚀 开始测试
+                </button>
+                {/* 查看上次结果 */}
+                {loadValidCache(nodes.map(n => n.tag)) && (
+                  <button
+                    onClick={restoreCachedResults}
+                    className="text-xs text-gray-400 hover:text-[var(--accent)] border border-gray-700 hover:border-[var(--accent)] px-3 py-2 rounded-lg transition-colors"
+                  >
+                    📋 查看上次结果
+                  </button>
+                )}
+              </div>
 
               {error && <div className="text-sm text-red-400">{error}</div>}
             </div>
@@ -702,7 +841,7 @@ export default function NodeTestModal({
                           className={`border-t border-[var(--border)] transition-colors cursor-pointer hover:bg-[var(--accent)]/5 ${
                             selectedTag === r.tag ? 'bg-[var(--accent)]/10 ring-1 ring-inset ring-[var(--accent)]' : ''
                           }`}
-                          onClick={() => { setSelectedTag(r.tag); onSelect?.(r.tag) }}
+                          onClick={() => { setSelectedTag(r.tag); onSelect(r.tag) }}
                         >
                           <td className="px-4 py-2 text-xs text-gray-500">{i + 1}</td>
                           <td className="px-2 py-2">
@@ -725,7 +864,7 @@ export default function NodeTestModal({
                               type="radio"
                               name="nodeSelect"
                               checked={selectedTag === r.tag}
-                              onChange={() => setSelectedTag(r.tag)}
+                              onChange={() => { setSelectedTag(r.tag); onSelect(r.tag) }}
                               className="w-4 h-4 accent-[var(--accent)]"
                             />
                           </td>
@@ -792,8 +931,15 @@ export default function NodeTestModal({
           <div className="text-xs text-gray-500">
             {nodes.length} 个节点
             {testDone && selectedTag && ' — 已选择最佳节点'}
+            {saved && <span className="text-green-400 ml-2">✓ 已保存</span>}
           </div>
           <div className="flex gap-2">
+            <button
+              onClick={onClose}
+              className="bg-gray-700 text-white px-4 py-2 rounded-lg text-sm hover:bg-gray-600 transition-colors"
+            >
+              关闭
+            </button>
             <button
               onClick={handleAdd}
               disabled={!selectedTag || adding}
