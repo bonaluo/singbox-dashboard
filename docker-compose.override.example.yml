@@ -1,0 +1,24 @@
+# docker-compose.override.example.yml — 覆盖配置示例
+# 复制为 docker-compose.override.yml 后按需修改（不会被 git 跟踪，见 .gitignore）
+#
+# Docker Compose 会自动合并 docker-compose.override.yml 到 docker-compose.yml，
+# 无需 -f 显式指定，也无需修改正式部署文件。
+#
+# ⚠️ 约定：docker-compose.override.yml 新增任何配置时，必须同步补充本示例文件。
+
+services:
+  # ── 后端 extra_hosts 示例 ─────────────────────
+  # 容器内解析不到的内网主机名，在此映射到宿主机可达的 IP
+  backend:
+    extra_hosts:
+      - "my-router.local:192.168.1.1"
+      - "nas.local:192.168.1.2"
+      # - "omni-cluster.asus.local:172.17.0.1"
+
+  # ── 前端环境变量覆盖示例 ─────────────────────
+  # server.js 用 HOSTNAME 决定监听地址；Docker 默认注入容器ID 导致只监听 IPv4，
+  # 用 :: 强制双栈监听，修复 localhost (IPv6) 无法访问的问题。
+  # （docker-compose.yml / docker-compose.dev.yml 已内置此配置，此处仅作覆盖示例）
+  # frontend:
+  #   environment:
+  #     - "HOSTNAME=::"

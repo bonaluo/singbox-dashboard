@@ -52,6 +52,9 @@ services:
     environment:
       - HOST=0.0.0.0
       - PORT=9000
+      # server.js 用 HOSTNAME 决定监听地址；Docker 默认注入容器ID 导致只监听 IPv4，
+      # 用 :: 强制双栈监听，修复 localhost (IPv6) 无法访问的问题
+      - "HOSTNAME=::"
     restart: unless-stopped
     depends_on:
       - backend
