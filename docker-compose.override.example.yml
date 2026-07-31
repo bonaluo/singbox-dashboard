@@ -13,6 +13,7 @@ services:
     extra_hosts:
       - "my-router.local:192.168.1.1"
       - "nas.local:192.168.1.2"
+      - "dev.asus.local:10.31.3.87"
       # - "omni-cluster.asus.local:172.17.0.1"
 
   # ── 前端环境变量覆盖示例 ─────────────────────
