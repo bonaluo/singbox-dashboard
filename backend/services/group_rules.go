@@ -9,7 +9,6 @@ import (
 	"singbox-dashboard/config"
 	"singbox-dashboard/models"
 	"sort"
-	"strings"
 )
 
 // ── 分组规则持久化 ──
@@ -62,36 +61,23 @@ func ApplyGroupRules() error {
 		return nil // 无规则时不操作
 	}
 
-	// 收集当前所有代理节点 tag（vmess 类型，排除 meta 行）
+	// 收集当前所有代理节点 tag（全部协议，包含信息节点）
 	outbounds, _ := cfg["outbounds"].([]interface{})
-	infoKws := []string{"流量", "套餐", "到期", "剩余", "过滤"}
 	var allTags []string
-	proxyTags := make(map[string]bool)
 	for _, ob := range outbounds {
 		m, ok := ob.(map[string]interface{})
 		if !ok {
 			continue
 		}
 		t, _ := m["type"].(string)
-		if t != "vmess" {
+		if !isProxyType(t) {
 			continue
 		}
 		tag, _ := m["tag"].(string)
 		if tag == "" {
 			continue
 		}
-		skip := false
-		for _, kw := range infoKws {
-			if strings.Contains(tag, kw) {
-				skip = true
-				break
-			}
-		}
-		if skip {
-			continue
-		}
 		allTags = append(allTags, tag)
-		proxyTags[tag] = true
 	}
 
 	// 收集已存在的出站组名称（用于引用检查）

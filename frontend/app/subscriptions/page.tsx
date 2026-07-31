@@ -293,6 +293,9 @@ export default function SubscriptionsPage() {
                     <div key={i} className="flex items-center gap-2 text-xs py-1 border-b border-[var(--border)]/30 last:border-0">
                       <span className="text-gray-600 w-5">{i + 1}</span>
                       <span className="w-16 text-gray-500 truncate">{n.region}</span>
+                      {n.is_info && (
+                        <span className="text-[10px] px-1 py-0.5 rounded bg-amber-500/20 text-amber-400 shrink-0">信息</span>
+                      )}
                       <span className="flex-1 truncate">{n.tag}</span>
                       <span className="text-gray-500">{n.type}</span>
                     </div>

@@ -195,17 +195,6 @@ func GetGroupMembers() ([]models.GroupMember, []models.GroupMember) {
 	return proxyMembers, groupMembers
 }
 
-// isMetaLine 判断是否是无用信息行（非真实节点）
-func isMetaLine(tag string) bool {
-	metaKeywords := []string{"剩余流量", "距离下次重置", "套餐到期", "过滤掉"}
-	for _, kw := range metaKeywords {
-		if strings.Contains(tag, kw) {
-			return true
-		}
-	}
-	return false
-}
-
 // ── 获取全部出站（含组和节点）──
 
 // GetAllOutbounds 从 sing-box 配置读取全部出站（不过滤类型），返回 tag+type

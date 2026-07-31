@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"singbox-dashboard/config"
@@ -497,63 +499,13 @@ func ApplySubscription(id string) error {
 
 	var newOutbounds []interface{}
 	for _, n := range cachedNodes {
-		ob := map[string]interface{}{
-			"type":        n.Type,
-			"tag":         n.Tag,
-			"server":      n.Server,
-			"server_port": n.Port,
-		}
-		// 从 raw_link 解析完整 vmess 配置
-		if n.RawLink != "" && strings.HasPrefix(n.RawLink, "vmess://") {
-			payload := n.RawLink[8:]
-			if m := len(payload) % 4; m != 0 {
-				payload += strings.Repeat("=", 4-m)
-			}
-			if data, e := base64.StdEncoding.DecodeString(payload); e == nil {
-				var vm map[string]interface{}
-				if json.Unmarshal(data, &vm) == nil {
-					ob["uuid"] = vm["id"]
-					ob["security"] = "auto"
-					ob["alter_id"] = 0
-					transport := map[string]interface{}{}
-					if net, _ := vm["net"].(string); net == "ws" {
-						transport["type"] = "ws"
-						transport["path"] = vm["path"]
-						if host, ok := vm["host"].(string); ok && host != "" {
-							transport["headers"] = map[string]interface{}{"Host": host}
-						}
-					} else {
-						transport["type"] = net
-					}
-					ob["transport"] = transport
-					if tls, _ := vm["tls"].(string); tls == "tls" {
-						ob["tls"] = map[string]interface{}{"enabled": true}
-					}
-				}
-			}
-		}
-		newOutbounds = append(newOutbounds, ob)
+		newOutbounds = append(newOutbounds, nodeOutbound(n))
 	}
 
-	// 构建 selector，排除非代理行（tag 含流量/套餐/到期/剩余/过滤等）
-	// 同时按地区分组，用于后续生成地区 urltest 出站
+	// 构建 selector（全部代理节点 + direct），同时按地区分组生成地区 urltest 出站
 	var tags []string
 	regionGroups := make(map[string][]string)
-	infoKws := []string{"流量", "套餐", "到期", "剩余", "过滤"}
 	for _, n := range cachedNodes {
-		if n.Type != "vmess" {
-			continue
-		}
-		skip := false
-		for _, kw := range infoKws {
-			if strings.Contains(n.Tag, kw) {
-				skip = true
-				break
-			}
-		}
-		if skip {
-			continue
-		}
 		tags = append(tags, n.Tag)
 
 		// 按地区归类
@@ -569,10 +521,19 @@ func ApplySubscription(id string) error {
 		regionGroups[name] = append(regionGroups[name], n.Tag)
 	}
 	tags = append(tags, "direct")
+
+	// selector 默认选中第一个非信息节点
+	def := tags[0]
+	for _, t := range tags {
+		if !isInfoNode(t) {
+			def = t
+			break
+		}
+	}
 	newOutbounds = append(newOutbounds, map[string]interface{}{
 		"type": "selector", "tag": "proxy",
 		"outbounds": tags,
-		"default":   tags[0],
+		"default":   def,
 	})
 	newOutbounds = append(newOutbounds, map[string]interface{}{
 		"type": "direct", "tag": "direct",
@@ -625,68 +586,624 @@ func ApplySubscription(id string) error {
 	return SaveAppliedSubscriptionID(id)
 }
 
-// ── 解析 vmess:// / ss:// 等链接 ──
+// ── 解析订阅链接（vmess / vless / trojan / hysteria2 / hysteria / tuic / ss）──
 
 func parseSubscriptionLines(lines []string) []models.ProxyNode {
 	var nodes []models.ProxyNode
-	seen := make(map[string]bool) // dedup
+	seen := make(map[string]bool) // dedup：按原始链接去重
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-
-		var tag, typ, server string
-		var port int
-
-		if strings.HasPrefix(line, "vmess://") {
-			payload := line[8:]
-			// 补齐 base64 padding
-			if m := len(payload) % 4; m != 0 {
-				payload += strings.Repeat("=", 4-m)
-			}
-			data, err := base64.StdEncoding.DecodeString(payload)
-			if err != nil {
-				continue
-			}
-			var nd map[string]interface{}
-			if err := json.Unmarshal(data, &nd); err != nil {
-				continue
-			}
-
-			tag, _ = nd["ps"].(string)
-			typ = "vmess"
-			server, _ = nd["add"].(string)
-			if p, ok := nd["port"]; ok {
-				port = toInt(p)
-			}
-		} else if strings.HasPrefix(line, "ss://") {
-			// 简化 SS 解析
-			tag = fmt.Sprintf("SS-%s", line[5:20])
-			typ = "shadowsocks"
-			server = "unknown"
-		} else {
+		node, ok := parseNodeLink(line)
+		if !ok {
 			continue
 		}
-
-		// dedup — 相同 tag 只保留第一条
-		if seen[tag] {
+		// 完全相同的原始行只保留第一条（如多行重复的"剩余流量"信息行）
+		key := node.RawLink
+		if key == "" {
+			key = node.Tag
+		}
+		if seen[key] {
 			continue
 		}
-		seen[tag] = true
-
-		nodes = append(nodes, models.ProxyNode{
-			Tag:     tag,
-			Type:    typ,
-			Server:  server,
-			Port:    port,
-			Region:  detectRegion(tag),
-			RawLink: line,
-		})
+		seen[key] = true
+		nodes = append(nodes, node)
 	}
 
-	return nodes
+	// 信息节点排到最上面（剩余流量/套餐/到期/过滤等），真实节点随后
+	var infoNodes, realNodes []models.ProxyNode
+	for _, n := range nodes {
+		if n.IsInfo {
+			infoNodes = append(infoNodes, n)
+		} else {
+			realNodes = append(realNodes, n)
+		}
+	}
+	return append(infoNodes, realNodes...)
+}
+
+// parseNodeLink 按协议前缀分发解析，返回节点（含完整 sing-box 出站配置）
+func parseNodeLink(line string) (models.ProxyNode, bool) {
+	switch {
+	case strings.HasPrefix(line, "vmess://"):
+		return parseVmessLink(line)
+	case strings.HasPrefix(line, "vless://"):
+		return parseVlessLink(line)
+	case strings.HasPrefix(line, "trojan://"):
+		return parseTrojanLink(line)
+	case strings.HasPrefix(line, "hysteria2://"), strings.HasPrefix(line, "hy2://"):
+		return parseHysteria2Link(line)
+	case strings.HasPrefix(line, "hysteria://"):
+		return parseHysteriaLink(line)
+	case strings.HasPrefix(line, "tuic://"):
+		return parseTuicLink(line)
+	case strings.HasPrefix(line, "ss://"):
+		return parseSSLink(line)
+	}
+	return models.ProxyNode{}, false
+}
+
+// ── vmess://base64(json) ──
+
+func parseVmessLink(line string) (models.ProxyNode, bool) {
+	payload := line[8:]
+	if m := len(payload) % 4; m != 0 {
+		payload += strings.Repeat("=", 4-m)
+	}
+	data, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		return models.ProxyNode{}, false
+	}
+	var nd map[string]interface{}
+	if err := json.Unmarshal(data, &nd); err != nil {
+		return models.ProxyNode{}, false
+	}
+
+	tag, _ := nd["ps"].(string)
+	server, _ := nd["add"].(string)
+	port := toInt(nd["port"])
+	if server == "" || port == 0 {
+		return models.ProxyNode{}, false
+	}
+
+	ob := map[string]interface{}{
+		"type":        "vmess",
+		"tag":         tag,
+		"server":      server,
+		"server_port": port,
+		"security":    "auto",
+		"alter_id":    0,
+	}
+	if id, ok := nd["id"].(string); ok && id != "" {
+		ob["uuid"] = id
+	}
+	if netType, _ := nd["net"].(string); netType != "" && netType != "tcp" {
+		transport := map[string]interface{}{"type": netType}
+		if netType == "ws" {
+			if p, _ := nd["path"].(string); p != "" {
+				transport["path"] = p
+			}
+			if host, _ := nd["host"].(string); host != "" {
+				transport["headers"] = map[string]interface{}{"Host": host}
+			}
+		}
+		ob["transport"] = transport
+	}
+	if tls, _ := nd["tls"].(string); tls == "tls" {
+		t := map[string]interface{}{"enabled": true}
+		if sni, _ := nd["sni"].(string); sni != "" {
+			t["server_name"] = sni
+		}
+		ob["tls"] = t
+	}
+
+	node := mkNode(tag, "vmess", server, port, line)
+	node.Config = ob
+	return node, true
+}
+
+// ── vless://uuid@host:port?params#name ──
+
+func parseVlessLink(line string) (models.ProxyNode, bool) {
+	u, err := url.Parse(line)
+	if err != nil || u.User == nil || u.Host == "" {
+		return models.ProxyNode{}, false
+	}
+	host, port, ok := splitHostPort(u.Host)
+	if !ok {
+		return models.ProxyNode{}, false
+	}
+	q := queryMap(u.RawQuery)
+	tag := unescapeFragment(u.Fragment)
+
+	ob := map[string]interface{}{
+		"type":        "vless",
+		"tag":         tag,
+		"server":      host,
+		"server_port": port,
+		"uuid":        u.User.Username(),
+	}
+	if f := q["flow"]; f != "" {
+		ob["flow"] = f
+	}
+	if tls := buildTLS(q, q["security"], host); tls != nil {
+		ob["tls"] = tls
+	}
+	if tr := buildTransport(q); tr != nil {
+		ob["transport"] = tr
+	}
+	node := mkNode(tag, "vless", host, port, line)
+	node.Config = ob
+	return node, true
+}
+
+// ── trojan://password@host:port?params#name ──
+
+func parseTrojanLink(line string) (models.ProxyNode, bool) {
+	u, err := url.Parse(line)
+	if err != nil || u.User == nil || u.Host == "" {
+		return models.ProxyNode{}, false
+	}
+	host, port, ok := splitHostPort(u.Host)
+	if !ok {
+		return models.ProxyNode{}, false
+	}
+	q := queryMap(u.RawQuery)
+	tag := unescapeFragment(u.Fragment)
+
+	ob := map[string]interface{}{
+		"type":        "trojan",
+		"tag":         tag,
+		"server":      host,
+		"server_port": port,
+		"password":    u.User.Username(),
+	}
+	security := q["security"]
+	if security == "" {
+		security = "tls" // trojan 默认启用 TLS
+	}
+	if tls := buildTLS(q, security, host); tls != nil {
+		ob["tls"] = tls
+	}
+	if tr := buildTransport(q); tr != nil {
+		ob["transport"] = tr
+	}
+	node := mkNode(tag, "trojan", host, port, line)
+	node.Config = ob
+	return node, true
+}
+
+// ── hysteria2://password@host:port?params#name ──
+
+func parseHysteria2Link(line string) (models.ProxyNode, bool) {
+	raw := line
+	if strings.HasPrefix(raw, "hy2://") {
+		raw = "hysteria2://" + raw[6:]
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return models.ProxyNode{}, false
+	}
+	host, port, ok := splitHostPort(u.Host)
+	if !ok {
+		return models.ProxyNode{}, false
+	}
+	q := queryMap(u.RawQuery)
+	tag := unescapeFragment(u.Fragment)
+	password := ""
+	if u.User != nil {
+		password = u.User.Username()
+	}
+
+	ob := map[string]interface{}{
+		"type":        "hysteria2",
+		"tag":         tag,
+		"server":      host,
+		"server_port": port,
+	}
+	if password != "" {
+		ob["password"] = password
+	}
+	if tls := buildTLS(q, "tls", host); tls != nil {
+		ob["tls"] = tls
+	}
+	if obfs := first(q, "obfs", "obfs-type"); obfs != "" {
+		o := map[string]interface{}{"type": obfs}
+		if pw := first(q, "obfs-password", "obfsPassword"); pw != "" {
+			o["password"] = pw
+		}
+		ob["obfs"] = o
+	}
+	node := mkNode(tag, "hysteria2", host, port, line)
+	node.Config = ob
+	return node, true
+}
+
+// ── hysteria://host:port?params#name (v1) ──
+
+func parseHysteriaLink(line string) (models.ProxyNode, bool) {
+	u, err := url.Parse(line)
+	if err != nil || u.Host == "" {
+		return models.ProxyNode{}, false
+	}
+	host, port, ok := splitHostPort(u.Host)
+	if !ok {
+		return models.ProxyNode{}, false
+	}
+	q := queryMap(u.RawQuery)
+	tag := unescapeFragment(u.Fragment)
+
+	ob := map[string]interface{}{
+		"type":        "hysteria",
+		"tag":         tag,
+		"server":      host,
+		"server_port": port,
+	}
+	if up := q["up"]; up != "" {
+		var n int
+		if _, err := fmt.Sscanf(up, "%d", &n); err == nil {
+			ob["up_mbps"] = n
+		}
+	}
+	if down := q["down"]; down != "" {
+		var n int
+		if _, err := fmt.Sscanf(down, "%d", &n); err == nil {
+			ob["down_mbps"] = n
+		}
+	}
+	if auth := q["auth"]; auth != "" {
+		ob["auth"] = auth // base64 密码
+	} else if authStr := q["auth_str"]; authStr != "" {
+		ob["auth_str"] = authStr
+	}
+	if obfs := q["obfs"]; obfs != "" {
+		ob["obfs"] = obfs
+	}
+	if tls := buildTLS(q, "tls", host); tls != nil {
+		ob["tls"] = tls
+	}
+	node := mkNode(tag, "hysteria", host, port, line)
+	node.Config = ob
+	return node, true
+}
+
+// ── tuic://uuid:password@host:port?params#name ──
+
+func parseTuicLink(line string) (models.ProxyNode, bool) {
+	u, err := url.Parse(line)
+	if err != nil || u.User == nil || u.Host == "" {
+		return models.ProxyNode{}, false
+	}
+	host, port, ok := splitHostPort(u.Host)
+	if !ok {
+		return models.ProxyNode{}, false
+	}
+	q := queryMap(u.RawQuery)
+	tag := unescapeFragment(u.Fragment)
+
+	ob := map[string]interface{}{
+		"type":        "tuic",
+		"tag":         tag,
+		"server":      host,
+		"server_port": port,
+	}
+	if pw, has := u.User.Password(); has {
+		ob["uuid"] = u.User.Username()
+		ob["password"] = pw
+	} else {
+		ob["password"] = u.User.Username() // 仅 token 形式
+	}
+	if cc := q["congestion_control"]; cc != "" {
+		ob["congestion_control"] = cc
+	}
+	if ur := q["udp_relay_mode"]; ur != "" {
+		ob["udp_relay_mode"] = ur
+	}
+	if tls := buildTLS(q, "tls", host); tls != nil {
+		ob["tls"] = tls
+	}
+	node := mkNode(tag, "tuic", host, port, line)
+	node.Config = ob
+	return node, true
+}
+
+// ── ss:// (SIP002 与 legacy) ──
+
+func parseSSLink(line string) (models.ProxyNode, bool) {
+	raw := strings.TrimPrefix(line, "ss://")
+	tag := ""
+	if i := strings.IndexByte(raw, '#'); i >= 0 {
+		tag = unescapeFragment(raw[i+1:])
+		raw = raw[:i]
+	}
+	var q map[string]string
+	if i := strings.IndexByte(raw, '?'); i >= 0 {
+		q = queryMap(raw[i+1:])
+		raw = raw[:i]
+	}
+
+	var method, password, host string
+	var port int
+	if at := strings.LastIndexByte(raw, '@'); at >= 0 {
+		// SIP002: ss://base64(method:password)@host:port
+		if data, err := decodeSS(raw[:at]); err != nil {
+			return models.ProxyNode{}, false
+		} else if m, p, ok := splitColon(string(data)); !ok {
+			return models.ProxyNode{}, false
+		} else {
+			method, password = m, p
+		}
+		var hpOK bool
+		host, port, hpOK = splitHostPort(raw[at+1:])
+		if !hpOK {
+			return models.ProxyNode{}, false
+		}
+	} else {
+		// legacy: ss://base64(method:password@host:port)
+		data, err := decodeSS(raw)
+		if err != nil {
+			return models.ProxyNode{}, false
+		}
+		text := string(data)
+		at := strings.IndexByte(text, '@')
+		if at < 0 {
+			return models.ProxyNode{}, false
+		}
+		if m, p, ok := splitColon(text[:at]); !ok {
+			return models.ProxyNode{}, false
+		} else {
+			method, password = m, p
+		}
+		var hpOK bool
+		host, port, hpOK = splitHostPort(text[at+1:])
+		if !hpOK {
+			return models.ProxyNode{}, false
+		}
+	}
+
+	ob := map[string]interface{}{
+		"type":        "shadowsocks",
+		"tag":         tag,
+		"server":      host,
+		"server_port": port,
+		"method":      method,
+		"password":    password,
+	}
+	if plugin := q["plugin"]; plugin != "" {
+		ob["plugin"] = plugin
+	}
+	if opts := q["plugin_opts"]; opts != "" {
+		ob["plugin_opts"] = opts
+	}
+	if tr := buildTransport(q); tr != nil {
+		ob["transport"] = tr
+	}
+	node := mkNode(tag, "shadowsocks", host, port, line)
+	node.Config = ob
+	return node, true
+}
+
+// ── 通用辅助 ──
+
+// mkNode 构造 ProxyNode：补充地区、信息节点标记，并为空 tag 生成兜底名
+func mkNode(tag, typ, server string, port int, line string) models.ProxyNode {
+	if tag == "" {
+		tag = fmt.Sprintf("%s-%s:%d", typ, server, port)
+	}
+	return models.ProxyNode{
+		Tag:     tag,
+		Type:    typ,
+		Server:  server,
+		Port:    port,
+		Region:  detectRegion(tag),
+		RawLink: line,
+		IsInfo:  isInfoNode(tag),
+	}
+}
+
+// isInfoNode 信息节点：tag 含流量/套餐/到期/剩余/过滤等非代理关键字
+func isInfoNode(tag string) bool {
+	for _, kw := range []string{"流量", "套餐", "到期", "剩余", "过滤"} {
+		if strings.Contains(tag, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+// isProxyType 判断是否为可代理出站类型
+func isProxyType(t string) bool {
+	switch t {
+	case "vmess", "vless", "trojan", "hysteria", "hysteria2", "tuic", "shadowsocks":
+		return true
+	}
+	return false
+}
+
+// nodeOutbound 生成节点的 sing-box 出站配置；新缓存直接使用 Config，旧缓存回退到 vmess 重解析
+func nodeOutbound(n models.ProxyNode) map[string]interface{} {
+	if n.Config != nil {
+		return n.Config
+	}
+	ob := map[string]interface{}{
+		"type":        n.Type,
+		"tag":         n.Tag,
+		"server":      n.Server,
+		"server_port": n.Port,
+	}
+	// 旧缓存兼容：vmess raw_link 重解析
+	if n.RawLink != "" && strings.HasPrefix(n.RawLink, "vmess://") {
+		if node, ok := parseVmessLink(n.RawLink); ok && node.Config != nil {
+			node.Config["tag"] = n.Tag
+			return node.Config
+		}
+	}
+	return ob
+}
+
+// buildTLS 生成 sing-box tls 对象；security 为 none/空时返回 nil
+func buildTLS(q map[string]string, security, server string) map[string]interface{} {
+	if security == "" || security == "none" {
+		return nil
+	}
+	tls := map[string]interface{}{"enabled": true}
+	sni := first(q, "sni", "servername", "peer")
+	if sni == "" {
+		sni = server
+	}
+	if sni != "" {
+		tls["server_name"] = sni
+	}
+	if alpn := q["alpn"]; alpn != "" {
+		tls["alpn"] = strings.Split(alpn, ",")
+	}
+	if fp := q["fp"]; fp != "" {
+		tls["utls"] = map[string]interface{}{"enabled": true, "fingerprint": fp}
+	}
+	if security == "reality" {
+		reality := map[string]interface{}{"enabled": true}
+		if pbk := q["pbk"]; pbk != "" {
+			reality["public_key"] = pbk
+		}
+		if sid := q["sid"]; sid != "" {
+			reality["short_id"] = sid
+		}
+		if spx := q["spx"]; spx != "" {
+			reality["spider_x"] = spx
+		}
+		tls["reality"] = reality
+	}
+	if v := first(q, "insecure", "allowInsecure"); v == "1" || strings.EqualFold(v, "true") {
+		tls["insecure"] = true
+	}
+	return tls
+}
+
+// buildTransport 生成 sing-box transport 对象；tcp 或未知类型返回 nil
+func buildTransport(q map[string]string) map[string]interface{} {
+	switch q["type"] {
+	case "ws":
+		tr := map[string]interface{}{"type": "ws"}
+		if p := q["path"]; p != "" {
+			tr["path"] = p
+		}
+		if h := q["host"]; h != "" {
+			tr["headers"] = map[string]interface{}{"Host": h}
+		}
+		return tr
+	case "grpc":
+		tr := map[string]interface{}{"type": "grpc"}
+		if p := q["path"]; p != "" {
+			tr["service_name"] = strings.TrimPrefix(p, "/")
+		}
+		if q["mode"] == "multi" {
+			tr["multi_mode"] = true
+		}
+		return tr
+	case "http":
+		tr := map[string]interface{}{"type": "http"}
+		if p := q["path"]; p != "" {
+			tr["path"] = p
+		}
+		if h := q["host"]; h != "" {
+			tr["host"] = strings.Split(h, ",")
+		}
+		return tr
+	case "quic":
+		return map[string]interface{}{"type": "quic"}
+	case "httpupgrade", "h2":
+		tr := map[string]interface{}{"type": "httpupgrade"}
+		if p := q["path"]; p != "" {
+			tr["path"] = p
+		}
+		return tr
+	}
+	return nil
+}
+
+// queryMap 解析 URL 查询参数，自动 URL 解码
+func queryMap(rawQuery string) map[string]string {
+	m := map[string]string{}
+	for rawQuery != "" {
+		var kv string
+		if i := strings.IndexAny(rawQuery, "&;"); i >= 0 {
+			kv, rawQuery = rawQuery[:i], rawQuery[i+1:]
+		} else {
+			kv, rawQuery = rawQuery, ""
+		}
+		if kv == "" {
+			continue
+		}
+		if i := strings.IndexByte(kv, '='); i >= 0 {
+			k := kv[:i]
+			v, err := url.QueryUnescape(kv[i+1:])
+			if err != nil {
+				v = kv[i+1:]
+			}
+			if k != "" {
+				m[k] = v
+			}
+		} else if k, err := url.QueryUnescape(kv); err == nil {
+			m[k] = ""
+		}
+	}
+	return m
+}
+
+func first(q map[string]string, keys ...string) string {
+	for _, k := range keys {
+		if v := q[k]; v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// unescapeFragment 还原订阅链接 # 后的节点名（可能 URL 编码，+ 视为空格）
+func unescapeFragment(s string) string {
+	if s == "" {
+		return ""
+	}
+	s = strings.ReplaceAll(s, "+", "%20")
+	if d, err := url.PathUnescape(s); err == nil {
+		return d
+	}
+	return s
+}
+
+func splitHostPort(hostport string) (string, int, bool) {
+	host, portStr, err := net.SplitHostPort(hostport)
+	if err != nil {
+		return "", 0, false
+	}
+	var port int
+	if _, err := fmt.Sscanf(portStr, "%d", &port); err != nil || port <= 0 || port > 65535 {
+		return "", 0, false
+	}
+	return host, port, true
+}
+
+// splitColon 拆分 "method:password"
+func splitColon(s string) (string, string, bool) {
+	i := strings.IndexByte(s, ':')
+	if i < 0 {
+		return "", "", false
+	}
+	return s[:i], s[i+1:], true
+}
+
+// decodeSS 兼容 std 与 url-safe 两种 base64（自动补齐 padding）
+func decodeSS(s string) ([]byte, error) {
+	if data, err := base64.RawURLEncoding.DecodeString(s); err == nil {
+		return data, nil
+	}
+	if m := len(s) % 4; m != 0 {
+		s += strings.Repeat("=", 4-m)
+	}
+	return base64.StdEncoding.DecodeString(s)
 }
 
 func toInt(v interface{}) int {

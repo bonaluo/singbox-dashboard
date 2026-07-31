@@ -38,15 +38,19 @@ type SubscriptionStore struct {
 	Subscriptions []Subscription `json:"subscriptions"`
 }
 
-// ── Proxy Node (parsed from vmess:// etc) ──
+// ── Proxy Node (parsed from vmess:// / vless:// / trojan:// etc) ──
 
 type ProxyNode struct {
-	Tag      string `json:"tag"`
-	Type     string `json:"type"` // vmess, vless, ss, trojan
-	Server   string `json:"server"`
-	Port     int    `json:"port"`
-	Region   string `json:"region,omitempty"`
-	RawLink  string `json:"raw_link,omitempty"` // original vmess:// link
+	Tag     string `json:"tag"`
+	Type    string `json:"type"` // vmess, vless, trojan, hysteria2, hysteria, tuic, shadowsocks
+	Server  string `json:"server"`
+	Port    int    `json:"port"`
+	Region  string `json:"region,omitempty"`
+	RawLink string `json:"raw_link,omitempty"` // original 订阅行（如 vless://...）
+	IsInfo  bool   `json:"is_info,omitempty"`  // 信息节点（剩余流量/套餐/到期/过滤等非代理行）
+	// Config 该节点的完整 sing-box 出站配置体（type/tag/server/server_port + 协议字段），
+	// 由解析时生成，应用订阅时直接复用。
+	Config map[string]interface{} `json:"config,omitempty"`
 }
 
 // OutboundOption 出站选项，含类型和实时状态（供规则页下拉选择）

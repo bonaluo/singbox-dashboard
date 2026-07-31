@@ -6,7 +6,6 @@ import (
 	"net/url"
 	"os/exec"
 	"singbox-dashboard/config"
-	"strings"
 	"sync"
 	"time"
 )
@@ -255,53 +254,3 @@ func TestNodesStream(req NodeTestRequest, callback func(NodeTestEvent)) {
 	})
 }
 
-// ── 辅助：获取节点列表的可测试项 ──
-
-// GetTestableNodes 返回所有非组、非 direct 的节点 tag 列表
-func GetTestableNodes() []string {
-	cfg, err := loadSingBoxConfig()
-	if err != nil {
-		return nil
-	}
-	var tags []string
-	outbounds, ok := cfg["outbounds"].([]interface{})
-	if !ok {
-		return nil
-	}
-	for _, ob := range outbounds {
-		m, ok := ob.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		t, _ := m["type"].(string)
-		tag, _ := m["tag"].(string)
-		if tag == "" {
-			continue
-		}
-		// 排除组和 direct
-		if t == "selector" || t == "urltest" || t == "loadbalance" || t == "direct" || t == "block" || t == "dns" {
-			continue
-		}
-		// 排除元信息行
-		if isMetaLine(tag) {
-			continue
-		}
-		tags = append(tags, tag)
-	}
-	return tags
-}
-
-// DeduplicateTags 去重 + 过滤空值
-func DeduplicateTags(tags []string) []string {
-	seen := make(map[string]bool)
-	var result []string
-	for _, t := range tags {
-		t = strings.TrimSpace(t)
-		if t == "" || seen[t] {
-			continue
-		}
-		seen[t] = true
-		result = append(result, t)
-	}
-	return result
-}
