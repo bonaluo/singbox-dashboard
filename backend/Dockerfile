@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 ARG GO_IMAGE=golang:1.25-alpine
 ARG SINGBOX_IMAGE=ghcr.io/sagernet/sing-box:v1.13.12
 FROM ${GO_IMAGE} AS builder
@@ -9,7 +10,8 @@ COPY config/ config/
 COPY handlers/ handlers/
 COPY models/ models/
 COPY services/ services/
-RUN CGO_ENABLED=0 go build -ldflags="-X 'singbox-dashboard/config.GitCommit=${GIT_COMMIT}' -X 'singbox-dashboard/config.Version=${VERSION}'" -o singbox-dashboard .
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 go build -ldflags="-X 'singbox-dashboard/config.GitCommit=${GIT_COMMIT}' -X 'singbox-dashboard/config.Version=${VERSION}'" -o singbox-dashboard .
 
 FROM ${SINGBOX_IMAGE}
 # alpine 换源到阿里云（国内 docker 默认走国际源极慢）

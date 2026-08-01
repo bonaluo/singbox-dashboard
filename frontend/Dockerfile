@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 ARG NODE_IMAGE=node:22-alpine
 ARG NPM_REGISTRY=https://registry.npmjs.org
 ARG NEXT_PUBLIC_API=http://localhost:9092
@@ -10,9 +11,11 @@ ENV NEXT_PUBLIC_API=${NEXT_PUBLIC_API}
 ENV NEXT_PUBLIC_BUILD_DATE=${NEXT_PUBLIC_BUILD_DATE}
 WORKDIR /app
 COPY package*.json ./
-RUN npm install --registry ${NPM_REGISTRY}
+RUN --mount=type=cache,target=/root/.npm \
+    npm install --registry ${NPM_REGISTRY}
 COPY . .
-RUN npm run build
+RUN --mount=type=cache,target=/app/.next/cache \
+    npm run build
 
 FROM ${NODE_IMAGE}
 WORKDIR /app
