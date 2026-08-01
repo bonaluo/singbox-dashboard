@@ -1123,7 +1123,7 @@ func buildTLS(q map[string]string, security, server string) map[string]interface
 			reality["short_id"] = sid
 		}
 		if spx := q["spx"]; spx != "" {
-			reality["spider_x"] = spx
+			// sing-box 1.13 不支持 spider_x 字段，跳过
 		}
 		tls["reality"] = reality
 	}
