@@ -1,4 +1,3 @@
-'use client'
 
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
@@ -72,8 +71,9 @@ export default function SidebarStatus() {
   }, [])
 
   // 版本号拼接前端构建时间，方便确认部署是否生效
-  const displayVersion = process.env.NEXT_PUBLIC_BUILD_DATE && process.env.NEXT_PUBLIC_BUILD_DATE !== 'unknown'
-    ? `${version}  ⌂${process.env.NEXT_PUBLIC_BUILD_DATE}`
+  const buildDate = import.meta.env.VITE_BUILD_DATE
+  const displayVersion = buildDate && buildDate !== 'unknown'
+    ? `${version}  ⌂${buildDate}`
     : version
 
   if (!mounted) return null
@@ -99,7 +99,7 @@ export default function SidebarStatus() {
         infoSlot
       )}
       {verSlot && createPortal(
-        <span title={`后端: ${version}  |  前端构建: ${process.env.NEXT_PUBLIC_BUILD_DATE || 'unknown'}`}>{displayVersion}</span>,
+        <span title={`后端: ${version}  |  前端构建: ${import.meta.env.VITE_BUILD_DATE || 'unknown'}`}>{displayVersion}</span>,
         verSlot
       )}
     </>

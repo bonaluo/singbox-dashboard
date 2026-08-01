@@ -1,4 +1,3 @@
-'use client'
 
 /**
  * 获取后端 API 基础地址。
@@ -7,7 +6,7 @@
  * 2. 从浏览器当前域名自动推导（同协议+主机名，端口 +92）
  *    例如: http://asus-dev.local:9001 → http://asus-dev.local:9093
  *          http://asus-dev.local:9000 → http://asus-dev.local:9092
- * 3. 构建时环境变量 NEXT_PUBLIC_API
+ * 3. 构建时环境变量 VITE_API
  * 4. 硬编码默认值
  */
 export function getApiUrl(): string {
@@ -22,12 +21,12 @@ export function getApiUrl(): string {
       : parseFallbackPort()
     return `${loc.protocol}//${loc.hostname}:${backendPort}`
   }
-  return process.env.NEXT_PUBLIC_API || 'http://localhost:9092'
+  return import.meta.env.VITE_API || 'http://localhost:9092'
 }
 
 /** 从构建时环境变量提取后端端口，作为无前端端口时的兜底 */
 function parseFallbackPort(): number {
-  const fallback = process.env.NEXT_PUBLIC_API || 'http://localhost:9092'
+  const fallback = import.meta.env.VITE_API || 'http://localhost:9092'
   try {
     const p = parseInt(new URL(fallback).port, 10)
     return p || 9092

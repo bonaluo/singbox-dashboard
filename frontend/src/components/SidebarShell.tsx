@@ -1,7 +1,5 @@
-'use client'
 
-import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { Link, useLocation } from 'react-router-dom'
 
 const navItems = [
   { href: '/', label: '首页', icon: '🏠' },
@@ -15,7 +13,7 @@ const navItems = [
 ]
 
 export default function SidebarShell({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname()
+  const { pathname } = useLocation()
 
   return (
     <div className="flex h-screen">
@@ -30,7 +28,7 @@ export default function SidebarShell({ children }: { children: React.ReactNode }
           {navItems.map(item => (
             <Link
               key={item.href}
-              href={item.href}
+              to={item.href}
               className={`flex items-center gap-3 px-3 py-2 rounded-lg mb-1 text-sm transition-colors ${
                 pathname === item.href
                   ? 'bg-[#1d9bf0]/20 text-[#1d9bf0]'

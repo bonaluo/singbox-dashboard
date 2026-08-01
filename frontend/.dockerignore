@@ -1,5 +1,4 @@
 node_modules
 .git
-# 只排除构建缓存，保留宿主机构建的产物
-.next/cache
-.next/trace
+# Vite dev 缓存，排除以减小构建上下文
+src/**/*.tsbuildinfo

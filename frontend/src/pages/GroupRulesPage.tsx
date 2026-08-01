@@ -1,4 +1,3 @@
-'use client'
 
 import { useState, useEffect } from 'react'
 import { api } from '@/components/Sidebar'
@@ -21,7 +20,7 @@ const defaultRule: GroupRule = {
   sort_order: 0,
 }
 
-export default function GroupRulesPanel() {
+export default function GroupRulesPage() {
   const [rules, setRules] = useState<GroupRule[]>([])
   const [editing, setEditing] = useState<number | null>(null)
   const [editRule, setEditRule] = useState<GroupRule>({ ...defaultRule })
@@ -35,10 +34,22 @@ export default function GroupRulesPanel() {
 
   useEffect(() => { loadRules() }, [])
 
+  const startEdit = (i: number) => {
+    setEditing(i)
+    setEditRule({ ...rules[i] })
+  }
+
   const addNew = () => {
     const newRule = { ...defaultRule, sort_order: rules.length }
     setEditing(rules.length)
     setEditRule(newRule)
+  }
+
+  const deleteRule = (i: number) => {
+    const next = rules.filter((_, idx) => idx !== i)
+    setRules(next)
+    setEditing(null)
+    setEditRule({ ...defaultRule })
   }
 
   const saveRule = () => {
@@ -54,12 +65,6 @@ export default function GroupRulesPanel() {
     setEditRule({ ...defaultRule })
   }
 
-  const deleteRule = (i: number) => {
-    setRules(rules.filter((_, idx) => idx !== i))
-    setEditing(null)
-    setEditRule({ ...defaultRule })
-  }
-
   const saveAllToServer = async () => {
     setLoading(true)
     setMsg('')
@@ -67,8 +72,11 @@ export default function GroupRulesPanel() {
       method: 'POST',
       body: JSON.stringify({ rules }),
     })
-    if (r.ok) setMsg('✅ 分组规则已保存')
-    else setMsg(r.error || '保存失败')
+    if (r.ok) {
+      setMsg('✅ 分组规则已保存')
+    } else {
+      setMsg(r.error || '保存失败')
+    }
     setLoading(false)
   }
 
@@ -76,39 +84,50 @@ export default function GroupRulesPanel() {
     setLoading(true)
     setMsg('')
     const r = await api('/api/group-rules/apply', { method: 'POST' })
-    if (r.ok) setMsg('✅ 分组规则已应用到 sing-box')
-    else setMsg(r.error || '应用失败')
+    if (r.ok) {
+      setMsg('✅ 分组规则已应用到 sing-box')
+    } else {
+      setMsg(r.error || '应用失败')
+    }
     setLoading(false)
   }
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-3">
-        <p className="text-xs text-gray-500">
-          正则匹配节点 tag 自动创建出站组。按 sort_order 顺序执行，每次应用订阅后自动重建。
-        </p>
+    <div className="max-w-4xl">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-xl font-bold">📋 分组规则</h2>
         <div className="flex gap-2">
           <button onClick={addNew}
-            className="bg-[var(--accent)] text-white px-3 py-1.5 rounded-lg text-sm hover:opacity-90">
+            className="bg-[var(--accent)] text-white px-4 py-2 rounded-lg text-sm hover:opacity-90">
             + 添加规则
           </button>
           <button onClick={saveAllToServer} disabled={loading || rules.length === 0}
-            className="bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm hover:opacity-90 disabled:opacity-50">
+            className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm hover:opacity-90 disabled:opacity-50">
             {loading ? '保存中...' : '💾 保存全部'}
           </button>
           <button onClick={applyRules} disabled={loading || rules.length === 0}
-            className="bg-purple-600 text-white px-3 py-1.5 rounded-lg text-sm hover:opacity-90 disabled:opacity-50">
+            className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm hover:opacity-90 disabled:opacity-50">
             {loading ? '应用中...' : '▶ 立即应用'}
           </button>
         </div>
       </div>
 
-      {msg && <div className="text-sm mb-2 text-green-400">{msg}</div>}
+      {msg && (
+        <div className="text-sm mb-3 text-green-400">{msg}</div>
+      )}
+
+      <p className="text-xs text-gray-500 mb-4">
+        定义正则分组规则，每次应用订阅后自动创建/更新出站组。
+        规则按 sort_order 顺序执行，pattern 匹配节点 tag，matches 与已有的出站组名。
+        下方预览仅供编辑，点击「保存全部」后再点「立即应用」生效。
+      </p>
 
       {/* 编辑面板 */}
       {editing !== null && (
-        <div className="bg-[var(--surface)] rounded-xl p-4 mb-3 border border-[var(--accent)]/30">
-          <h3 className="font-semibold mb-3">{editing < rules.length ? '编辑规则' : '添加规则'}</h3>
+        <div className="bg-[var(--surface)] rounded-xl p-4 mb-4 border border-[var(--accent)]/30">
+          <h3 className="font-semibold mb-3">
+            {editing < rules.length ? '编辑规则' : '添加规则'}
+          </h3>
           <div className="grid grid-cols-2 gap-3 mb-3">
             <div>
               <label className="text-xs text-gray-500 mb-1 block">组名称</label>
@@ -156,20 +175,26 @@ export default function GroupRulesPanel() {
             </div>
           </div>
           <div className="flex gap-2">
-            <button onClick={saveRule} disabled={!editRule.name}
+            <button onClick={saveRule}
+              disabled={!editRule.name}
               className="bg-[var(--accent)] text-white px-4 py-2 rounded-lg text-sm hover:opacity-90 disabled:opacity-50">
               {editing < rules.length ? '更新' : '添加'}
             </button>
             <button onClick={() => { setEditing(null); setEditRule({ ...defaultRule }) }}
-              className="text-gray-400 px-4 py-2 rounded-lg text-sm hover:text-gray-200">取消</button>
+              className="text-gray-400 px-4 py-2 rounded-lg text-sm hover:text-gray-200">
+              取消
+            </button>
             {editing < rules.length && (
               <button onClick={() => deleteRule(editing)}
-                className="text-red-400 px-4 py-2 rounded-lg text-sm hover:text-red-300 ml-auto">删除</button>
+                className="text-red-400 px-4 py-2 rounded-lg text-sm hover:text-red-300 ml-auto">
+                删除
+              </button>
             )}
           </div>
         </div>
       )}
 
+      {/* 规则列表 */}
       {rules.length === 0 && !editing && (
         <div className="text-gray-500 text-sm py-12 text-center bg-[var(--surface)] rounded-xl border border-[var(--border)]">
           暂无分组规则，点击「+ 添加规则」创建
@@ -178,15 +203,17 @@ export default function GroupRulesPanel() {
 
       {rules.map((rule, i) => (
         <div key={i} className="bg-[var(--surface)] rounded-xl p-4 mb-2 border border-[var(--border)] hover:border-gray-600 cursor-pointer transition-colors"
-          onClick={() => { setEditing(i); setEditRule({ ...rules[i] }) }}>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-500 w-6">#{rule.sort_order}</span>
-            <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${
-              rule.type === 'urltest' ? 'bg-purple-500/20 text-purple-400' : rule.type === 'loadbalance' ? 'bg-green-500/20 text-green-400' : 'bg-blue-500/20 text-blue-400'
-            }`}>
-              {rule.type === 'urltest' ? 'URL' : rule.type === 'loadbalance' ? 'LB' : 'SEL'}
-            </span>
-            <span className="font-medium text-sm">{rule.name}</span>
+          onClick={() => startEdit(i)}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-500 w-6">#{rule.sort_order}</span>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${
+                rule.type === 'urltest' ? 'bg-purple-500/20 text-purple-400' : rule.type === 'loadbalance' ? 'bg-green-500/20 text-green-400' : 'bg-blue-500/20 text-blue-400'
+              }`}>
+                {rule.type === 'urltest' ? 'URL' : rule.type === 'loadbalance' ? 'LB' : 'SEL'}
+              </span>
+              <span className="font-medium text-sm">{rule.name}</span>
+            </div>
           </div>
           <div className="text-xs text-gray-500 mt-1 ml-8">
             {rule.pattern ? (

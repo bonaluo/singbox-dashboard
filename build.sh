@@ -13,9 +13,9 @@ echo "━━━ 宿主机构建前端 ━━━"
 NPM_REGISTRY=${NPM_REGISTRY:-https://registry.npmmirror.com}
 (cd frontend && \
   npm install --registry "$NPM_REGISTRY" && \
-  NEXT_PUBLIC_API=${NEXT_PUBLIC_API:-http://localhost:9092} \
-  NEXT_PUBLIC_BUILD_DATE=$BUILD_DATE \
-  npm run build -- --no-lint)
+  VITE_API=${VITE_API:-http://localhost:9092} \
+  VITE_BUILD_DATE=$BUILD_DATE \
+  npm run build)
 echo "━━━ 前端构建完成 ━━━"
 echo ""
 
