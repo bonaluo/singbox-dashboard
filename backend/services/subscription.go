@@ -129,6 +129,7 @@ type FetchResult struct {
 func FetchRaw(subURL string) (string, error) {
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		Proxy:           http.ProxyURL(&url.URL{Scheme: "http", Host: "127.0.0.1:2080"}),
 	}
 	client := &http.Client{Transport: tr, Timeout: 30 * time.Second}
 	resp, err := client.Get(subURL)
@@ -186,9 +187,10 @@ func FetchAndParseSubscription(id string) (*FetchResult, error) {
 		return nil, fmt.Errorf("subscription not found: %s", id)
 	}
 
-	// 拉取（跳过 SSL 验证，兼容各种订阅服务商）
+	// 拉取（跳过 SSL 验证，兼容各种订阅服务商；走 sing-box 本地代理拉取）
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		Proxy:           http.ProxyURL(&url.URL{Scheme: "http", Host: "127.0.0.1:2080"}),
 	}
 	client := &http.Client{Transport: tr, Timeout: 30 * time.Second}
 	resp, err := client.Get(subURL)
