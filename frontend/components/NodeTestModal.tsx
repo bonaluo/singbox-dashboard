@@ -30,8 +30,8 @@ interface SSEEvent {
   error?: string
 }
 
-// 缓存数据结构：保存上一次的测试配置和结果
-interface NodeTestCache {
+// 缓存数据结构：支持多条测试历史记录，每条含快照信息
+interface NodeTestCacheEntry {
   config: {
     testLatency: boolean
     testDownload: boolean
@@ -47,45 +47,86 @@ interface NodeTestCache {
     latencyStatus: 'pending' | 'testing' | 'done'
     downloadStatus: 'pending' | 'testing' | 'done'
   }>
-  nodes: string[]  // 用于校验缓存的节点列表是否与当前匹配
+  nodes: string[]
+  timestamp: number  // Date.now() 测试完成时刻
+  best?: { tag: string; type: 'latency' | 'download'; value: number }
+}
+
+interface NodeTestCache {
+  version: 2
+  entries: NodeTestCacheEntry[]
 }
 
 const CACHE_KEY = 'nodeTestCache'
+const MAX_CACHE_ENTRIES = 5
 
-// 从 localStorage 加载缓存
-function loadCache(): NodeTestCache | null {
+function loadCacheEntries(): NodeTestCacheEntry[] {
   try {
     const raw = localStorage.getItem(CACHE_KEY)
-    if (!raw) return null
-    return JSON.parse(raw) as NodeTestCache
+    if (!raw) return []
+    const data = JSON.parse(raw)
+    // 版本门控：v1 缓存直接丢弃
+    if (data?.version !== 2 || !Array.isArray(data?.entries)) return []
+    return (data.entries as NodeTestCacheEntry[]).sort((a, b) => b.timestamp - a.timestamp)
   } catch {
-    return null
+    return []
   }
 }
 
-// 保存缓存到 localStorage
-function saveCache(cache: NodeTestCache) {
+function saveCacheEntry(entry: NodeTestCacheEntry) {
   try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify(cache))
+    const entries = loadCacheEntries()
+    // 去重：相同时间戳视为同一测试（兼容 StrictMode 双调）
+    const filtered = entries.filter(e => e.timestamp !== entry.timestamp)
+    filtered.unshift(entry)
+    const trimmed = filtered.slice(0, MAX_CACHE_ENTRIES)
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ version: 2, entries: trimmed }))
   } catch { /* 忽略存储满等错误 */ }
 }
 
-// 清除缓存
-function clearCache() {
+function removeCacheEntry(timestamp: number) {
   try {
-    localStorage.removeItem(CACHE_KEY)
+    const entries = loadCacheEntries().filter(e => e.timestamp !== timestamp)
+    if (entries.length === 0) { localStorage.removeItem(CACHE_KEY) }
+    else { localStorage.setItem(CACHE_KEY, JSON.stringify({ version: 2, entries })) }
   } catch { /* ignore */ }
 }
 
-// 验证并加载缓存（返回 null 表示无有效缓存）
-function loadValidCache(currentNodes: string[]): NodeTestCache | null {
-  const cache = loadCache()
-  if (!cache) return null
-  const currentTags = new Set(currentNodes)
-  const cachedTags = new Set(cache.nodes)
-  const match = currentTags.size === cachedTags.size && Array.from(currentTags).every(t => cachedTags.has(t))
-  if (!match) { clearCache(); return null }
-  return cache
+function clearAllCache() {
+  try { localStorage.removeItem(CACHE_KEY) } catch { /* ignore */ }
+}
+
+// 校验缓存的节点列表与当前是否匹配
+function nodesMatch(cachedNodes: string[], currentNodes: string[]): boolean {
+  const a = new Set(cachedNodes)
+  const b = new Set(currentNodes)
+  return a.size === b.size && Array.from(a).every(t => b.has(t))
+}
+
+// 从测试结果构建缓存条目
+function buildCacheEntry(
+  results: Map<string, NodeTestResult>,
+  config: NodeTestCacheEntry['config'],
+  tags: string[],
+  timestamp: number,
+): NodeTestCacheEntry {
+  let best: NodeTestCacheEntry['best'] | undefined
+  if (!config.testLatency || !config.testDownload) {
+    const key = config.testLatency ? 'latency' : 'download'
+    let bestTag = ''; let bestVal = key === 'latency' ? Infinity : -1
+    results.forEach((r) => {
+      if (key === 'latency' && r.latency > 0 && r.latency < bestVal) { bestVal = r.latency; bestTag = r.tag }
+      if (key === 'download' && r.downloadSpeed > 0 && r.downloadSpeed > bestVal) { bestVal = r.downloadSpeed; bestTag = r.tag }
+    })
+    if (bestTag) best = { tag: bestTag, type: key, value: bestVal }
+  }
+  return {
+    config,
+    results: Array.from(results.values()),
+    nodes: tags,
+    timestamp,
+    best,
+  }
 }
 
 export default function NodeTestModal({
@@ -124,6 +165,8 @@ export default function NodeTestModal({
   const [error, setError] = useState('')
   const [adding, setAdding] = useState(false)
   const [saved, setSaved] = useState(false) // 保存成功提示
+  const [cacheEntries, setCacheEntries] = useState<NodeTestCacheEntry[]>([])
+  const [expandedEntryTs, setExpandedEntryTs] = useState<number | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
   // Reset results on mount only（避免 nodes 引用变化导致运行时清空选中状态）
@@ -144,12 +187,13 @@ export default function NodeTestModal({
     setError('')
   }, [nodes])
 
-  // 仅在挂载时执行初始 reset，不响应 nodes 引用变化
+  // 仅在挂载时执行初始 reset + 加载历史缓存，不响应 nodes 引用变化
   const didMountRef = useRef(false)
   useEffect(() => {
     if (!didMountRef.current) {
       didMountRef.current = true
       resetResults()
+      setCacheEntries(loadCacheEntries())
     }
   }, [resetResults])
 
@@ -164,40 +208,6 @@ export default function NodeTestModal({
       setDownloadUrl('')
     }
   }, [useSuggestedDomain, suggestedDomain])
-
-  // 从缓存恢复上一次的测试配置和结果（供 useEffect 和按钮共用）
-  const restoreCachedResults = useCallback(() => {
-    const cache = loadValidCache(nodes.map(n => n.tag))
-    if (!cache) return false
-
-    setTestLatency(cache.config.testLatency)
-    setTestDownload(cache.config.testDownload)
-    setConcurrency(cache.config.concurrency)
-    setLatencyUrl(cache.config.latencyUrl)
-    setDownloadUrl(cache.config.downloadUrl)
-    setUseSuggestedDomain(cache.config.useSuggestedDomain)
-
-    const map = new Map<string, NodeTestResult>()
-    cache.results.forEach(r => {
-      map.set(r.tag, { tag: r.tag, latency: r.latency, downloadSpeed: r.downloadSpeed, latencyStatus: r.latencyStatus, downloadStatus: r.downloadStatus })
-    })
-    setResults(map)
-    setTestDone(true)
-
-    if (!cache.config.testLatency || !cache.config.testDownload) {
-      const key = cache.config.testLatency ? 'latency' : 'download'
-      let bestTag = ''; let bestVal = Infinity
-      map.forEach((r) => {
-        if (key === 'latency') { if (r.latency > 0 && r.latency < bestVal) { bestVal = r.latency; bestTag = r.tag } }
-        else { if (r.downloadSpeed > 0 && r.downloadSpeed > bestVal) { bestVal = r.downloadSpeed; bestTag = r.tag } }
-      })
-      if (bestTag) { setSelectedTag(bestTag); onSelect(bestTag) }
-    }
-    return true
-  }, [nodes, onSelect])
-
-  // 首次挂载时自动恢复缓存
-  useEffect(() => { restoreCachedResults() }, [])
 
   // Start testing
   const startTest = async () => {
@@ -301,7 +311,7 @@ export default function NodeTestModal({
         if (!testLatency || !testDownload) {
           const key = testLatency ? 'latency' : 'download'
           let bestTag = ''
-          let bestVal = Infinity
+          let bestVal = key === 'latency' ? Infinity : -1
           if (key === 'latency') {
             prev.forEach((r) => {
               if (r.latency > 0 && r.latency < bestVal) {
@@ -319,12 +329,11 @@ export default function NodeTestModal({
           }
           autoTag = bestTag
         }
-        // 保存缓存（兜底：SSE complete 事件可能已保存，这里再确认一次）
-        saveCache({
-          config: { testLatency, testDownload, concurrency, latencyUrl, downloadUrl, useSuggestedDomain },
-          results: Array.from(prev.values()),
-          nodes: nodes.map(n => n.tag),
-        })
+        // 保存测试历史（兜底：SSE complete 事件可能已保存，这里再确认一次）
+        const ts = Date.now()
+        const entry = buildCacheEntry(prev, { testLatency, testDownload, concurrency, latencyUrl, downloadUrl, useSuggestedDomain }, nodes.map(n => n.tag), ts)
+        saveCacheEntry(entry)
+        setCacheEntries(loadCacheEntries())
         return prev
       })
       if (autoTag) { setSelectedTag(autoTag); onSelect(autoTag) }
@@ -349,7 +358,7 @@ export default function NodeTestModal({
         if (!testLatency || !testDownload) {
           const key = testLatency ? 'latency' : 'download'
           let bestTag = ''
-          let bestVal = Infinity
+          let bestVal = key === 'latency' ? Infinity : -1
           if (key === 'latency') {
             prev.forEach((r) => {
               if (r.latency > 0 && r.latency < bestVal) {
@@ -367,12 +376,11 @@ export default function NodeTestModal({
           }
           autoTag = bestTag
         }
-        // 保存缓存
-        saveCache({
-          config: { testLatency, testDownload, concurrency, latencyUrl, downloadUrl, useSuggestedDomain },
-          results: Array.from(prev.values()),
-          nodes: nodes.map(n => n.tag),
-        })
+        // 保存测试历史
+        const ts = Date.now()
+        const entry = buildCacheEntry(prev, { testLatency, testDownload, concurrency, latencyUrl, downloadUrl, useSuggestedDomain }, nodes.map(n => n.tag), ts)
+        saveCacheEntry(entry)
+        setCacheEntries(loadCacheEntries())
         return prev
       })
       if (autoTag) { setSelectedTag(autoTag); onSelect(autoTag) }
@@ -698,15 +706,6 @@ export default function NodeTestModal({
                 >
                   🚀 开始测试
                 </button>
-                {/* 查看上次结果 */}
-                {loadValidCache(nodes.map(n => n.tag)) && (
-                  <button
-                    onClick={restoreCachedResults}
-                    className="text-xs text-gray-400 hover:text-[var(--accent)] border border-gray-700 hover:border-[var(--accent)] px-3 py-2 rounded-lg transition-colors"
-                  >
-                    📋 查看上次结果
-                  </button>
-                )}
               </div>
 
               {error && <div className="text-sm text-red-400">{error}</div>}
@@ -923,6 +922,154 @@ export default function NodeTestModal({
 
           {error && !testing && (
             <div className="text-sm text-red-400 bg-red-500/10 rounded-lg px-4 py-3">{error}</div>
+          )}
+
+          {/* 测试历史 */}
+          {cacheEntries.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-gray-400">
+                  📋 历史测试记录 ({cacheEntries.length})
+                </span>
+                <button
+                  onClick={() => { clearAllCache(); setCacheEntries([]); setExpandedEntryTs(null) }}
+                  className="text-xs text-gray-600 hover:text-red-400 transition-colors"
+                >
+                  清除全部
+                </button>
+              </div>
+
+              {cacheEntries.map(entry => {
+                const isExpanded = expandedEntryTs === entry.timestamp
+                const matched = nodesMatch(entry.nodes, nodes.map(n => n.tag))
+                const config = entry.config
+                const timeStr = new Date(entry.timestamp).toLocaleString('zh-CN', { hour12: false })
+
+                // 构建摘要描述
+                const testTypes: string[] = []
+                if (config.testLatency) testTypes.push('⚡ 延迟')
+                if (config.testDownload) testTypes.push('📥 下载')
+                const customUrl = config.latencyUrl || config.downloadUrl
+                  ? (config.latencyUrl || config.downloadUrl)
+                  : '默认'
+
+                return (
+                  <div
+                    key={entry.timestamp}
+                    className="bg-[var(--surface)] rounded-xl border border-[var(--border)] overflow-hidden"
+                  >
+                    {/* 卡片头部 */}
+                    <button
+                      onClick={() => setExpandedEntryTs(isExpanded ? null : entry.timestamp)}
+                      className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/[0.02] transition-colors text-left"
+                    >
+                      <span className={`transform transition-transform text-xs text-gray-500 ${isExpanded ? 'rotate-90' : ''}`}>▶</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs text-gray-300 font-mono">{timeStr}</span>
+                          {testTypes.map(t => (
+                            <span key={t} className="text-xs px-1.5 py-0.5 rounded bg-gray-700/50 text-gray-400">{t}</span>
+                          ))}
+                          <span className="text-xs text-gray-600">并发 {config.concurrency}</span>
+                          <span className="text-xs text-gray-600">{entry.nodes.length} 节点</span>
+                          {!matched && (
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-yellow-500/10 text-yellow-500">节点列表已变化</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
+                          <span className="truncate max-w-[300px]" title={customUrl}>
+                            🎯 {customUrl}
+                          </span>
+                          {entry.best && (
+                            <span className="text-[var(--accent)] shrink-0">
+                              最佳: <span className="font-mono">{renderNodeTag(entry.best.tag)}</span>
+                              {' — '}
+                              {entry.best.type === 'latency' ? `${entry.best.value}ms` : `${entry.best.value.toFixed(2)} MB/s`}
+                            </span>
+                          )}
+                          {!entry.best && <span className="text-gray-600 shrink-0">无可用结果</span>}
+                        </div>
+                      </div>
+                      <button
+                        onClick={e => { e.stopPropagation(); removeCacheEntry(entry.timestamp); setCacheEntries(loadCacheEntries()); if (isExpanded) setExpandedEntryTs(null) }}
+                        className="text-xs text-gray-600 hover:text-red-400 transition-colors shrink-0 px-2 py-1"
+                        title="删除此记录"
+                      >
+                        ✕
+                      </button>
+                    </button>
+
+                    {/* 展开详情：结果表格（只读） */}
+                    {isExpanded && (
+                      <div className="border-t border-[var(--border)] max-h-48 overflow-y-auto">
+                        <table className="w-full text-sm">
+                          <thead className="sticky top-0 bg-[#0a0f14]">
+                            <tr className="text-xs text-gray-500">
+                              <th className="text-left px-4 py-2 font-normal w-8">#</th>
+                              <th className="text-left px-2 py-2 font-normal">节点</th>
+                              {config.testLatency && (
+                                <th className="text-right px-4 py-2 font-normal w-20">延迟</th>
+                              )}
+                              {config.testDownload && (
+                                <th className="text-right px-4 py-2 font-normal w-24">下载速度</th>
+                              )}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(() => {
+                              // 按延迟/下载速度排序
+                              const sorted = [...entry.results]
+                                .filter(r => {
+                                  if (config.testLatency && !config.testDownload) return r.latencyStatus === 'done'
+                                  if (!config.testLatency && config.testDownload) return r.downloadStatus === 'done'
+                                  return r.latencyStatus === 'done' || r.downloadStatus === 'done'
+                                })
+                                .sort((a, b) => {
+                                  if (config.testLatency) {
+                                    const va = a.latency > 0 ? a.latency : 99999
+                                    const vb = b.latency > 0 ? b.latency : 99999
+                                    return va - vb
+                                  } else {
+                                    const va = a.downloadSpeed > 0 ? a.downloadSpeed : -1
+                                    const vb = b.downloadSpeed > 0 ? b.downloadSpeed : -1
+                                    return vb - va
+                                  }
+                                })
+                              return sorted.map((r, i) => {
+                                const lc = r.latency > 0
+                                  ? r.latency < 200 ? 'text-green-400' : r.latency < 500 ? 'text-yellow-400' : 'text-red-400'
+                                  : 'text-gray-600'
+                                const sc = r.downloadSpeed > 0
+                                  ? r.downloadSpeed > 10 ? 'text-green-400' : r.downloadSpeed > 3 ? 'text-yellow-400' : 'text-red-400'
+                                  : 'text-gray-600'
+                                return (
+                                  <tr key={r.tag} className="border-t border-[var(--border)]">
+                                    <td className="px-4 py-1.5 text-xs text-gray-500">{i + 1}</td>
+                                    <td className="px-2 py-1.5">
+                                      <span className="font-mono text-xs truncate max-w-[200px] block">{renderNodeTag(r.tag)}</span>
+                                    </td>
+                                    {config.testLatency && (
+                                      <td className={`px-4 py-1.5 text-right font-mono text-xs ${lc}`}>
+                                        {r.latency > 0 ? `${r.latency}ms` : '超时'}
+                                      </td>
+                                    )}
+                                    {config.testDownload && (
+                                      <td className={`px-4 py-1.5 text-right font-mono text-xs ${sc}`}>
+                                        {r.downloadSpeed > 0 ? `${r.downloadSpeed.toFixed(2)} MB/s` : '超时'}
+                                      </td>
+                                    )}
+                                  </tr>
+                                )
+                              })
+                            })()}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
           )}
         </div>
 
