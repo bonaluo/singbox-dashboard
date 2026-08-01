@@ -7,11 +7,19 @@ export default function SubscriptionsPage() {
   const [subs, setSubs] = useState<any[]>([])
   const [name, setName] = useState('')
   const [url, setUrl] = useState('')
+  const [content, setContent] = useState('')
+  const [inputMode, setInputMode] = useState<'link' | 'content'>('link')
+  // 内容粘贴弹窗
+  const [showContentModal, setShowContentModal] = useState(false)
+  const [modalContent, setModalContent] = useState('')
   const [loading, setLoading] = useState(false)
   const [activeSub, setActiveSub] = useState<string | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [cachedData, setCachedData] = useState<Record<string, any>>({})
   const [showRaw, setShowRaw] = useState(false)
+  // 编辑内容型订阅（更新时粘贴新内容）
+  const [editContentId, setEditContentId] = useState<string | null>(null)
+  const [editContent, setEditContent] = useState('')
 
   // 聚合相关
   const [showMerge, setShowMerge] = useState(false)
@@ -19,6 +27,7 @@ export default function SubscriptionsPage() {
   const [mergeName, setMergeName] = useState('')
   const [mergeSources, setMergeSources] = useState<Set<string>>(new Set())
   const [mergeExtraUrl, setMergeExtraUrl] = useState('')
+  const [useProxy, setUseProxy] = useState(false)
 
   const loadSubs = useCallback(async () => {
     const r = await api('/api/subscriptions')
@@ -31,16 +40,21 @@ export default function SubscriptionsPage() {
   useEffect(() => { loadSubs() }, [loadSubs])
 
   const addSub = async () => {
-    if (!name || !url) return
+    if (!name) return
+    if (inputMode === 'link' && !url) return
+    if (inputMode === 'content' && !content) return
     setLoading(true)
+    const payload: Record<string, any> = { name, use_proxy: useProxy }
+    if (inputMode === 'link') payload.url = url
+    else payload.content = content
     const r = await api('/api/subscriptions', {
       method: 'POST',
-      body: JSON.stringify({ name, url }),
+      body: JSON.stringify(payload),
     })
     if (r.ok) {
       const sub = r.data.subscription
       const result = r.data.result
-      setName(''); setUrl('')
+      setName(''); setUrl(''); setContent('')
       setCachedData(prev => ({ ...prev, [sub.id]: result }))
       setExpandedId(sub.id)
       await loadSubs()
@@ -50,14 +64,14 @@ export default function SubscriptionsPage() {
     setLoading(false)
   }
 
-  const deleteSub = async (id: string) => {
-    await api(`/api/subscriptions/${id}`, { method: 'DELETE' })
-    setCachedData(prev => { const n = { ...prev }; delete n[id]; return n })
-    setActiveSub(null)
-    loadSubs()
-  }
-
   const fetchSub = async (id: string) => {
+    // 内容型订阅：打开内联编辑框粘贴新内容
+    const sub = subs.find(s => s.id === id)
+    if (sub && sub.content) {
+      setEditContentId(id)
+      setEditContent(sub.content)
+      return
+    }
     setLoading(true)
     const r = await api(`/api/subscriptions/${id}/fetch`, { method: 'POST' })
     if (r.ok) {
@@ -66,6 +80,30 @@ export default function SubscriptionsPage() {
     }
     await loadSubs()
     setLoading(false)
+  }
+
+  const saveEditContent = async (id: string) => {
+    setLoading(true)
+    const r = await api(`/api/subscriptions/${id}/fetch`, {
+      method: 'POST',
+      body: JSON.stringify({ content: editContent }),
+    })
+    if (r.ok) {
+      setCachedData(prev => ({ ...prev, [id]: r.data }))
+      setExpandedId(id)
+      setEditContentId(null)
+      await loadSubs()
+    } else {
+      setSubMsg('❌ ' + (r.error || '更新失败'))
+    }
+    setLoading(false)
+  }
+
+  const deleteSub = async (id: string) => {
+    await api(`/api/subscriptions/${id}`, { method: 'DELETE' })
+    setCachedData(prev => { const n = { ...prev }; delete n[id]; return n })
+    setActiveSub(null)
+    loadSubs()
   }
 
   const applySub = async (id: string) => {
@@ -132,24 +170,52 @@ export default function SubscriptionsPage() {
       )}
 
       <div className="bg-[var(--surface)] rounded-xl p-4 mb-6 border border-[var(--border)]">
-        <h3 className="font-semibold mb-3">添加订阅</h3>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold">添加订阅</h3>
+          <div className="flex gap-1 text-xs">
+            {(['link', 'content'] as const).map(m => (
+              <button key={m} onClick={() => setInputMode(m)}
+                className={`px-2 py-1 rounded ${inputMode === m ? 'bg-[var(--accent)] text-white' : 'bg-gray-500/10 text-gray-400'}`}>
+                {m === 'link' ? '订阅链接' : '粘贴内容'}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="flex gap-3 mb-3">
           <input value={name} onChange={e => setName(e.target.value)}
             placeholder="名称"
             className="flex-1 bg-[#0f1419] border border-[var(--border)] rounded-lg px-3 py-2 text-sm" />
-          <input value={url} onChange={e => setUrl(e.target.value)}
-            placeholder="Clash 订阅地址"
-            className="flex-[2] bg-[#0f1419] border border-[var(--border)] rounded-lg px-3 py-2 text-sm" />
+          {inputMode === 'link' ? (
+            <input value={url} onChange={e => setUrl(e.target.value)}
+              placeholder="Clash 订阅地址"
+              className="flex-[2] bg-[#0f1419] border border-[var(--border)] rounded-lg px-3 py-2 text-sm" />
+          ) : (
+            <input readOnly value={content ? `📄 已粘贴内容（${content.length} 字符）` : ''}
+              onClick={() => { setModalContent(content); setShowContentModal(true) }}
+              placeholder="点击粘贴订阅内容"
+              className="flex-[2] bg-[#0f1419] border border-[var(--border)] rounded-lg px-3 py-2 text-sm cursor-pointer select-none" />
+          )}
         </div>
-        <div className="flex gap-2">
-          <button onClick={addSub} disabled={loading}
-            className="bg-[var(--accent)] text-white px-4 py-2 rounded-lg text-sm hover:opacity-90 disabled:opacity-50">
-            {loading ? '验证中...' : '添加订阅'}
+        <div className="flex items-center justify-between">
+          <button onClick={() => setUseProxy(!useProxy)}
+            title="拉取订阅时是否走 sing-box 代理"
+            className={`px-3 py-2 rounded-lg text-sm shrink-0 transition-colors ${
+              useProxy
+                ? 'bg-amber-500/15 text-amber-400 border border-amber-500/40'
+                : 'bg-[#0f1419] text-gray-400 border border-[var(--border)]'
+            }`}>
+            {useProxy ? '🟠 代理' : '⚪ 直连'}
           </button>
-          <button onClick={() => setShowMerge(!showMerge)}
-            className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm hover:opacity-90">
-            {showMerge ? '取消聚合' : '📎 创建聚合订阅'}
-          </button>
+          <div className="flex gap-2">
+            <button onClick={addSub} disabled={loading}
+              className="bg-[var(--accent)] text-white px-4 py-2 rounded-lg text-sm hover:opacity-90 disabled:opacity-50">
+              {loading ? '验证中...' : '添加订阅'}
+            </button>
+            <button onClick={() => setShowMerge(!showMerge)}
+              className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm hover:opacity-90">
+              {showMerge ? '取消聚合' : '📎 创建聚合订阅'}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -227,9 +293,32 @@ export default function SubscriptionsPage() {
                   临时
                 </span>
               )}
+              {sub.content && (
+                <span className="text-[10px] px-1 py-0.5 rounded bg-cyan-500/20 text-cyan-400 font-mono">
+                  内容
+                </span>
+              )}
               <span className="font-semibold">{sub.name}
                 {activeSub === sub.id && <span className="ml-2 text-xs text-green-400">● 当前</span>}
               </span>
+              {sub.use_proxy && (
+                <span className="text-[10px] px-1 py-0.5 rounded bg-amber-500/20 text-amber-400 shrink-0 cursor-pointer"
+                  title="点击切换" onClick={async () => {
+                    await api(`/api/subscriptions/${sub.id}/proxy`, { method: 'PUT', body: JSON.stringify({ use_proxy: !sub.use_proxy }) })
+                    loadSubs()
+                  }}>
+                  代理
+                </span>
+              )}
+              {!sub.use_proxy && (
+                <span className="text-[10px] px-1 py-0.5 rounded bg-gray-500/20 text-gray-400 shrink-0 cursor-pointer"
+                  title="点击切换" onClick={async () => {
+                    await api(`/api/subscriptions/${sub.id}/proxy`, { method: 'PUT', body: JSON.stringify({ use_proxy: !sub.use_proxy }) })
+                    loadSubs()
+                  }}>
+                  直连
+                </span>
+              )}
               {sub.node_count > 0 && (
                 <span className="text-xs text-gray-400">({sub.node_count} 节点)</span>
               )}
@@ -247,7 +336,25 @@ export default function SubscriptionsPage() {
                 className="bg-red-500/20 text-red-400 px-3 py-1 rounded text-xs hover:bg-red-500/30">删除</button>
             </div>
           </div>
-          <div className="text-xs text-gray-500 truncate">{sub.url}</div>
+          <div className="text-xs text-gray-500 truncate">{sub.url || (sub.content ? '(粘贴内容订阅)' : '')}</div>
+
+          {/* 内容型订阅的内联编辑器（更新时粘贴新内容） */}
+          {editContentId === sub.id && (
+            <div className="mt-2 border border-cyan-500/30 rounded-lg p-2 bg-[#0f1419]">
+              <textarea value={editContent} onChange={e => setEditContent(e.target.value)}
+                placeholder="粘贴订阅内容（base64 或节点列表），留空则重新解析已存内容"
+                rows={5}
+                className="w-full bg-transparent text-xs font-mono resize-y outline-none" />
+              <div className="flex gap-2 mt-2 justify-end">
+                <button onClick={() => setEditContentId(null)}
+                  className="bg-gray-500/20 text-gray-300 px-3 py-1 rounded text-xs hover:bg-gray-500/30">取消</button>
+                <button onClick={() => saveEditContent(sub.id)} disabled={loading}
+                  className="bg-cyan-600 text-white px-3 py-1 rounded text-xs hover:opacity-90 disabled:opacity-50">
+                  {loading ? '解析中...' : '解析并更新'}
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* 聚合订阅的子源显示 */}
           {sub.kind === 'aggregated' && sub.sources && sub.sources.length > 0 && (
@@ -306,6 +413,28 @@ export default function SubscriptionsPage() {
           )}
         </div>
       ))}
+
+      {/* 内容粘贴弹窗 */}
+      {showContentModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
+          onClick={() => setShowContentModal(false)}>
+          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-4 w-full max-w-lg"
+            onClick={e => e.stopPropagation()}>
+            <h3 className="font-semibold mb-2">📄 粘贴订阅内容</h3>
+            <textarea autoFocus value={modalContent} onChange={e => setModalContent(e.target.value)}
+              placeholder="粘贴订阅返回内容（base64 或 vmess://、vless:// 等节点列表）"
+              rows={10}
+              className="w-full bg-[#0f1419] border border-[var(--border)] rounded-lg px-3 py-2 text-sm font-mono resize-y outline-none" />
+            <div className="flex gap-2 justify-end mt-3">
+              <button onClick={() => setShowContentModal(false)}
+                className="bg-gray-500/20 text-gray-300 px-4 py-2 rounded-lg text-sm hover:bg-gray-500/30">取消</button>
+              <button onClick={() => { setContent(modalContent); setShowContentModal(false) }}
+                disabled={!modalContent.trim()}
+                className="bg-[var(--accent)] text-white px-4 py-2 rounded-lg text-sm hover:opacity-90 disabled:opacity-50">确定</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

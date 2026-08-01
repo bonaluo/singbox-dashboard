@@ -25,13 +25,15 @@ type SubscriptionSource struct {
 }
 
 type Subscription struct {
-	ID          string             `json:"id"`
-	Name        string             `json:"name"`
-	URL         string             `json:"url"`                    // kind=url 时的订阅地址；kind=aggregated 可为空
-	Kind        SubscriptionKind   `json:"kind"`                   // 订阅类型
-	LastUpdated string             `json:"last_updated,omitempty"`
-	NodeCount   int                `json:"node_count,omitempty"`
-	Sources     []SubscriptionSource `json:"sources,omitempty"`   // kind=aggregated 时的子源列表
+	ID          string               `json:"id"`
+	Name        string               `json:"name"`
+	URL         string               `json:"url"`                      // kind=url 时的订阅地址；kind=aggregated 可为空
+	Kind        SubscriptionKind     `json:"kind"`                     // 订阅类型
+	LastUpdated string               `json:"last_updated,omitempty"`
+	NodeCount   int                  `json:"node_count,omitempty"`
+	UseProxy    bool                 `json:"use_proxy,omitempty"`      // 拉取订阅时走 sing-box 代理
+	Content     string               `json:"content,omitempty"`        // 直接粘贴的订阅内容（base64 或明文节点列表），非空时优先于 URL 解析
+	Sources     []SubscriptionSource `json:"sources,omitempty"`        // kind=aggregated 时的子源列表
 }
 
 type SubscriptionStore struct {
@@ -161,9 +163,10 @@ type StatusResponse struct {
 // ── API responses ──
 
 type MergeRequest struct {
-	Name       string              `json:"name"`
-	Sources    []string            `json:"sources"`       // 要合并的已有订阅 ID
-	ExtraURLs  []string            `json:"extra_urls,omitempty"` // 额外临时链接
+	Name      string   `json:"name"`
+	Sources   []string `json:"sources"`              // 要合并的已有订阅 ID
+	ExtraURLs []string `json:"extra_urls,omitempty"` // 额外临时链接
+	UseProxy  bool     `json:"use_proxy,omitempty"`  // 临时链接拉取时走代理
 }
 
 // MergeResult 聚合/更新结果，包含每个子源的解析状态

@@ -32,6 +32,7 @@ func Register(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/subscriptions/{id}", handleDeleteSubscription)
 	mux.HandleFunc("POST /api/subscriptions/{id}/fetch", handleFetchSubscription)
 	mux.HandleFunc("POST /api/subscriptions/{id}/apply", handleApplySubscription)
+	mux.HandleFunc("PUT /api/subscriptions/{id}/proxy", handleToggleSubscriptionProxy)
 	mux.HandleFunc("GET /api/subscriptions/{id}/data", handleGetSubscriptionData)
 	mux.HandleFunc("POST /api/subscriptions/merge", handleMergeSubscriptions)
 
@@ -174,24 +175,31 @@ func handleAddSubscription(w http.ResponseWriter, r *http.Request) {
 	body := readBody(r)
 	name, _ := body["name"].(string)
 	url, _ := body["url"].(string)
-	if name == "" || url == "" {
-		sendError(w, 400, "name and url required")
+	content, _ := body["content"].(string)
+	useProxy, _ := body["use_proxy"].(bool)
+	if name == "" || (url == "" && content == "") {
+		sendError(w, 400, "name and (url or content) required")
 		return
 	}
-	// 先尝试拉取验证
-	raw, err := services.FetchRaw(url)
-	if err != nil {
-		sendError(w, 400, "订阅地址不可达: "+err.Error())
-		return
+	// 拉取/解析验证
+	var result *services.FetchResult
+	if content != "" {
+		// 直接粘贴内容，无需网络拉取
+		result = services.ParseRaw(content)
+	} else {
+		raw, err := services.FetchRaw(url, useProxy)
+		if err != nil {
+			sendError(w, 400, "订阅地址不可达: "+err.Error())
+			return
+		}
+		result = services.ParseRaw(raw)
 	}
-	// 解析验证
-	result := services.ParseRaw(raw)
 	if result.NodeCount == 0 {
 		sendError(w, 400, "未解析到有效节点")
 		return
 	}
 	// 保存订阅
-	sub, err := services.AddSubscription(name, url)
+	sub, err := services.AddSubscription(name, url, useProxy, content)
 	if err != nil {
 		sendError(w, 500, err.Error())
 		return
@@ -211,6 +219,17 @@ func handleDeleteSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sendOK(w, map[string]string{"deleted": id})
+}
+
+func handleToggleSubscriptionProxy(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	body := readBody(r)
+	useProxy, _ := body["use_proxy"].(bool)
+	if err := services.UpdateSubscriptionProxy(id, useProxy); err != nil {
+		sendError(w, 404, err.Error())
+		return
+	}
+	sendOK(w, map[string]bool{"use_proxy": useProxy})
 }
 
 func handleFetchSubscription(w http.ResponseWriter, r *http.Request) {
@@ -236,7 +255,14 @@ func handleFetchSubscription(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 普通订阅
+	// 普通订阅：支持请求体携带 content（粘贴新内容覆盖解析）
+	body := readBody(r)
+	if content, _ := body["content"].(string); content != "" {
+		if err := services.UpdateSubscriptionContent(id, content); err != nil {
+			sendError(w, 404, err.Error())
+			return
+		}
+	}
 	result, err := services.FetchAndParseSubscription(id)
 	if err != nil {
 		sendError(w, 500, err.Error())
@@ -280,7 +306,7 @@ func handleMergeSubscriptions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sub, nodes, sources, err := services.CreateMergedSubscription(req.Name, req.Sources, req.ExtraURLs)
+	sub, nodes, sources, err := services.CreateMergedSubscription(req.Name, req.Sources, req.ExtraURLs, req.UseProxy)
 	if err != nil {
 		sendError(w, 500, "创建聚合订阅失败: "+err.Error())
 		return

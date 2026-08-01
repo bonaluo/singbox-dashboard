@@ -54,16 +54,18 @@ func SaveSubscriptions(store *models.SubscriptionStore) error {
 
 // ── 添加订阅 ──
 
-func AddSubscription(name, url string) (*models.Subscription, error) {
+func AddSubscription(name, url string, useProxy bool, content string) (*models.Subscription, error) {
 	store, err := LoadSubscriptions()
 	if err != nil {
 		return nil, err
 	}
 	sub := models.Subscription{
-		ID:   fmt.Sprintf("sub_%d", time.Now().UnixMilli()),
-		Name: name,
-		URL:  url,
-		Kind: models.KindURL,
+		ID:       fmt.Sprintf("sub_%d", time.Now().UnixMilli()),
+		Name:     name,
+		URL:      url,
+		Kind:     models.KindURL,
+		UseProxy: useProxy,
+		Content:  content,
 	}
 	store.Subscriptions = append(store.Subscriptions, sub)
 	if err := SaveSubscriptions(store); err != nil {
@@ -125,13 +127,20 @@ type FetchResult struct {
 	UpdatedAt  string            `json:"updated_at"`
 }
 
-// FetchRaw 拉取订阅原始数据（不依赖已有记录）
-func FetchRaw(subURL string) (string, error) {
+// fetchTransport 构造拉取用的 http.Transport；useProxy 时走 sing-box 本地代理
+func fetchTransport(useProxy bool) *http.Transport {
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		Proxy:           http.ProxyURL(&url.URL{Scheme: "http", Host: "127.0.0.1:2080"}),
 	}
-	client := &http.Client{Transport: tr, Timeout: 30 * time.Second}
+	if useProxy {
+		tr.Proxy = http.ProxyURL(&url.URL{Scheme: "http", Host: "127.0.0.1:2080"})
+	}
+	return tr
+}
+
+// FetchRaw 拉取订阅原始数据（不依赖已有记录）
+func FetchRaw(subURL string, useProxy bool) (string, error) {
+	client := &http.Client{Transport: fetchTransport(useProxy), Timeout: 30 * time.Second}
 	resp, err := client.Get(subURL)
 	if err != nil {
 		return "", fmt.Errorf("拉取失败: %w", err)
@@ -177,38 +186,45 @@ func FetchAndParseSubscription(id string) (*FetchResult, error) {
 		return nil, err
 	}
 	var subURL string
+	var useProxy bool
+	var content string
 	for _, s := range store.Subscriptions {
 		if s.ID == id {
 			subURL = s.URL
+			useProxy = s.UseProxy
+			content = s.Content
 			break
 		}
 	}
-	if subURL == "" {
+	if subURL == "" && content == "" {
 		return nil, fmt.Errorf("subscription not found: %s", id)
 	}
 
-	// 拉取（跳过 SSL 验证，兼容各种订阅服务商；走 sing-box 本地代理拉取）
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		Proxy:           http.ProxyURL(&url.URL{Scheme: "http", Host: "127.0.0.1:2080"}),
-	}
-	client := &http.Client{Transport: tr, Timeout: 30 * time.Second}
-	resp, err := client.Get(subURL)
-	if err != nil {
-		return nil, fmt.Errorf("拉取失败: %w", err)
-	}
-	defer resp.Body.Close()
+	var raw string
+	if content != "" {
+		// 直接粘贴的订阅内容，无需网络拉取
+		raw = content
+	} else {
+		// 拉取（跳过 SSL 验证，兼容各种订阅服务商；按订阅设置决定是否走代理）
+		client := &http.Client{Transport: fetchTransport(useProxy), Timeout: 30 * time.Second}
+		resp, err := client.Get(subURL)
+		if err != nil {
+			return nil, fmt.Errorf("拉取失败: %w", err)
+		}
+		defer resp.Body.Close()
 
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("读取失败: %w", err)
+		rawBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("读取失败: %w", err)
+		}
+		raw = string(rawBytes)
 	}
 
 	// Base64 解码
-	decoded, err := base64.StdEncoding.DecodeString(string(raw))
+	decoded, err := base64.StdEncoding.DecodeString(raw)
 	if err != nil {
 		// 有些订阅返回未编码的纯文本
-		decoded = raw
+		decoded = []byte(raw)
 	}
 
 	text := string(decoded)
@@ -246,7 +262,7 @@ func FetchAndParseSubscription(id string) (*FetchResult, error) {
 // ── 聚合订阅 ──
 
 // resolveSource 解析单个子源（已有订阅 ID 或临时 URL）并返回结果
-func resolveSource(sourceID, sourceURL string) (int, []models.ProxyNode, string, error) {
+func resolveSource(sourceID, sourceURL string, useProxy bool) (int, []models.ProxyNode, string, error) {
 	if sourceID != "" {
 		// 已有订阅：读取缓存
 		data, err := GetCachedSubscriptionData(sourceID)
@@ -258,7 +274,7 @@ func resolveSource(sourceID, sourceURL string) (int, []models.ProxyNode, string,
 
 	if sourceURL != "" {
 		// 临时链接：拉取并解析
-		raw, err := FetchRaw(sourceURL)
+		raw, err := FetchRaw(sourceURL, useProxy)
 		if err != nil {
 			return 0, nil, "", fmt.Errorf("拉取失败: %w", err)
 		}
@@ -273,7 +289,7 @@ func resolveSource(sourceID, sourceURL string) (int, []models.ProxyNode, string,
 }
 
 // resolveSourceWithLabel 解析单个子源并返回带名称的 SubscriptionSource 和节点数据
-func resolveSourceWithLabel(sourceID, sourceURL string) (models.SubscriptionSource, []models.ProxyNode) {
+func resolveSourceWithLabel(sourceID, sourceURL string, useProxy bool) (models.SubscriptionSource, []models.ProxyNode) {
 	result := models.SubscriptionSource{
 		ID:  sourceID,
 		URL: sourceURL,
@@ -290,7 +306,7 @@ func resolveSourceWithLabel(sourceID, sourceURL string) (models.SubscriptionSour
 				}
 			}
 		}
-		count, nodes, _, err := resolveSource(sourceID, "")
+		count, nodes, _, err := resolveSource(sourceID, "", useProxy)
 		result.NodeCount = count
 		if err != nil {
 			result.Status = "error"
@@ -303,7 +319,7 @@ func resolveSourceWithLabel(sourceID, sourceURL string) (models.SubscriptionSour
 
 	if sourceURL != "" {
 		result.Name = sourceURL
-		count, nodes, _, err := resolveSource("", sourceURL)
+		count, nodes, _, err := resolveSource("", sourceURL, useProxy)
 		result.NodeCount = count
 		if err != nil {
 			result.Status = "error"
@@ -321,12 +337,12 @@ func resolveSourceWithLabel(sourceID, sourceURL string) (models.SubscriptionSour
 
 // LoadMergedSubscriptions 读取指定子源列表并合并去重
 // 返回：合并后的节点 + 各子源状态
-func LoadMergedSubscriptions(sources []models.SubscriptionSource) ([]models.ProxyNode, []models.SubscriptionSource) {
+func LoadMergedSubscriptions(sources []models.SubscriptionSource, useProxy bool) ([]models.ProxyNode, []models.SubscriptionSource) {
 	allNodes := make(map[string]models.ProxyNode)
 	var results []models.SubscriptionSource
 
 	for _, src := range sources {
-		srcResult, nodes := resolveSourceWithLabel(src.ID, src.URL)
+		srcResult, nodes := resolveSourceWithLabel(src.ID, src.URL, useProxy)
 		results = append(results, srcResult)
 
 		if srcResult.Status != "ok" {
@@ -347,7 +363,7 @@ func LoadMergedSubscriptions(sources []models.SubscriptionSource) ([]models.Prox
 }
 
 // CreateMergedSubscription 创建聚合订阅
-func CreateMergedSubscription(name string, sourceIDs []string, extraURLs []string) (*models.Subscription, []models.ProxyNode, []models.SubscriptionSource, error) {
+func CreateMergedSubscription(name string, sourceIDs []string, extraURLs []string, useProxy bool) (*models.Subscription, []models.ProxyNode, []models.SubscriptionSource, error) {
 	// 构建子源列表
 	var sources []models.SubscriptionSource
 	for _, sid := range sourceIDs {
@@ -357,7 +373,7 @@ func CreateMergedSubscription(name string, sourceIDs []string, extraURLs []strin
 		sources = append(sources, models.SubscriptionSource{URL: u})
 	}
 
-	nodes, results := LoadMergedSubscriptions(sources)
+	nodes, results := LoadMergedSubscriptions(sources, useProxy)
 
 	// 创建订阅记录
 	store, err := LoadSubscriptions()
@@ -366,10 +382,11 @@ func CreateMergedSubscription(name string, sourceIDs []string, extraURLs []strin
 	}
 
 	sub := models.Subscription{
-		ID:      fmt.Sprintf("sub_%d", time.Now().UnixMilli()),
-		Name:    name,
-		Kind:    models.KindAggregated,
-		Sources: results,
+		ID:       fmt.Sprintf("sub_%d", time.Now().UnixMilli()),
+		Name:     name,
+		Kind:     models.KindAggregated,
+		UseProxy: useProxy,
+		Sources:  results,
 	}
 
 	store.Subscriptions = append(store.Subscriptions, sub)
@@ -411,7 +428,7 @@ func UpdateAggregatedSubscription(subID string) ([]models.ProxyNode, []models.Su
 		return nil, nil, fmt.Errorf("非聚合订阅无法更新: %s", subID)
 	}
 
-	nodes, results := LoadMergedSubscriptions(sub.Sources)
+	nodes, results := LoadMergedSubscriptions(sub.Sources, sub.UseProxy)
 
 	sub.Sources = results
 	sub.NodeCount = len(nodes)
@@ -425,6 +442,38 @@ func UpdateAggregatedSubscription(subID string) ([]models.ProxyNode, []models.Su
 	SaveSubscriptions(store)
 
 	return nodes, results, nil
+}
+
+// UpdateSubscriptionProxy 切换订阅的 use_proxy 设置
+func UpdateSubscriptionProxy(id string, useProxy bool) error {
+	store, err := LoadSubscriptions()
+	if err != nil {
+		return err
+	}
+	for i := range store.Subscriptions {
+		if store.Subscriptions[i].ID == id {
+			store.Subscriptions[i].UseProxy = useProxy
+			return SaveSubscriptions(store)
+		}
+	}
+	return fmt.Errorf("subscription not found: %s", id)
+}
+
+// UpdateSubscriptionContent 更新订阅的粘贴内容（非空时覆盖，空串不覆盖）
+func UpdateSubscriptionContent(id, content string) error {
+	store, err := LoadSubscriptions()
+	if err != nil {
+		return err
+	}
+	for i := range store.Subscriptions {
+		if store.Subscriptions[i].ID == id {
+			if content != "" {
+				store.Subscriptions[i].Content = content
+			}
+			return SaveSubscriptions(store)
+		}
+	}
+	return fmt.Errorf("subscription not found: %s", id)
 }
 
 // ── 已应用订阅 ID 持久化 ──
@@ -467,7 +516,7 @@ func ApplySubscription(id string) error {
 	// 读取节点数据
 	var cachedNodes []models.ProxyNode
 	if sub.Kind == models.KindAggregated {
-		cachedNodes, _ = LoadMergedSubscriptions(sub.Sources)
+		cachedNodes, _ = LoadMergedSubscriptions(sub.Sources, sub.UseProxy)
 	} else {
 		data, e := os.ReadFile(filepath.Join(config.DataDir, "subscription_data", id+".json"))
 		if e != nil {
