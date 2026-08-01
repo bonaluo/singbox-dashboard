@@ -49,7 +49,7 @@ jobs:
         run: |
           cd frontend
           npm install
-          NEXT_PUBLIC_BUILD_DATE=$(date -u +%y.%m.%d.%H.%M) npm run build -- --no-lint
+          VITE_BUILD_DATE=$(date -u +%y.%m.%d.%H.%M) npm run build
 
       - name: Build & push frontend (multi-arch)
         uses: docker/build-push-action@v5
