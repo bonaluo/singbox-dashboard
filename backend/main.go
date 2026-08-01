@@ -8,6 +8,7 @@ import (
 	"singbox-dashboard/handlers"
 	"singbox-dashboard/services"
 	"strings"
+	"time"
 )
 
 func main() {
@@ -28,8 +29,25 @@ func main() {
 				log.Printf("[main] ApplyRules 失败（继续启动）: %v", err)
 			}
 		}
-		log.Println("启动 sing-box ...")
-		services.StartSingBox()
+
+		// 检查 sing-box 二进制是否存在
+		if _, err := os.Stat(config.SingBoxBin); os.IsNotExist(err) {
+			log.Printf("[main] ❌ sing-box 二进制不存在: %s，请安装 sing-box", config.SingBoxBin)
+		} else {
+			log.Println("启动 sing-box ...")
+			if err := services.StartSingBox(); err != nil {
+				log.Printf("[main] ❌ sing-box 启动失败: %v", err)
+			} else {
+				// 异步检查进程是否在 2 秒后仍存活（检测启动后立即崩溃的情况）
+				go func() {
+					time.Sleep(2 * time.Second)
+					if !services.IsSingBoxRunning() {
+						log.Printf("[main] ⚠️ sing-box 可能在启动后崩溃，请检查日志: %s",
+							config.LogPath())
+					}
+				}()
+			}
+		}
 	} else {
 		log.Println("未找到配置文件，等待订阅导入...")
 	}

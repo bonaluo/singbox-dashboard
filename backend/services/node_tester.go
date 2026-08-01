@@ -194,10 +194,11 @@ func TestNodesStream(req NodeTestRequest, callback func(NodeTestEvent)) {
 
 			// 延迟测试
 			if testLatency {
-				// status → testing
+				// status → testing（包含当前实际完成数，避免前端进度条归零）
 				latencyState.mu.Lock()
 				evt := latencyState.results[nodeTag]
 				evt.Status = "testing"
+				evt.Completed = latencyState.completed
 				latencyState.results[nodeTag] = evt
 				latencyState.mu.Unlock()
 				callback(evt)
@@ -219,10 +220,11 @@ func TestNodesStream(req NodeTestRequest, callback func(NodeTestEvent)) {
 
 			// 下载测试
 			if testDownload {
-				// status → testing
+				// status → testing（包含当前实际完成数，避免前端进度条归零）
 				downloadState.mu.Lock()
 				evt := downloadState.results[nodeTag]
 				evt.Status = "testing"
+				evt.Completed = downloadState.completed
 				downloadState.results[nodeTag] = evt
 				downloadState.mu.Unlock()
 				callback(evt)

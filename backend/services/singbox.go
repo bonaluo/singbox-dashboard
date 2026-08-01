@@ -510,6 +510,11 @@ func isRunning() bool {
 	return cmd.Run() == nil
 }
 
+// IsSingBoxRunning 公开的 sing-box 运行状态检查（供外部调用）
+func IsSingBoxRunning() bool {
+	return isRunning()
+}
+
 func getSingBoxVersion() string {
 	cmd := exec.Command("curl", "-s", "--noproxy", "*", "--max-time", "2", config.ClashAPI+"/version")
 	out, err := cmd.Output()
