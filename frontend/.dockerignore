@@ -1,3 +1,5 @@
-.next
 node_modules
 .git
+# 只排除构建缓存，保留宿主机构建的产物
+.next/cache
+.next/trace
