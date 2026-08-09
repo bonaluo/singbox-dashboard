@@ -307,6 +307,9 @@ func ParseRaw(raw string) *FetchResult {
 	if len(nodes) == 0 {
 		nodes = parseClashSubscription(text)
 	}
+	if len(nodes) == 0 {
+		nodes = parseSingBoxJSON(text)
+	}
 	result := &FetchResult{
 		RawText:   text,
 		RawLines:  lines,
@@ -375,10 +378,13 @@ func FetchAndParseSubscription(id string) (*FetchResult, error) {
 	text := string(decoded)
 	lines := strings.Split(strings.TrimSpace(text), "\n")
 
-	// 解析出节点（链接格式解析不到时回退到 Clash YAML 格式）
+	// 解析出节点（链接格式解析不到时回退 Clash YAML / sing-box JSON）
 	nodes := parseSubscriptionLines(lines)
 	if len(nodes) == 0 {
 		nodes = parseClashSubscription(text)
+	}
+	if len(nodes) == 0 {
+		nodes = parseSingBoxJSON(text)
 	}
 
 	// 更新订阅
@@ -783,6 +789,51 @@ func ApplySubscription(id string) error {
 	ApplyGroupRules()
 	// 持久化已应用的订阅 ID（重启后前端可恢复标识）
 	return SaveAppliedSubscriptionID(id)
+}
+
+// ── sing-box JSON 订阅解析（链接/Clash YAML 均解析不到时回退）──
+//
+// 部分机场面板按客户端 UA 返回不同格式：对 sing-box 系 UA 直接返回 sing-box
+// 配置 JSON（outbounds 数组）。此时可从 outbounds 提取节点。
+
+func parseSingBoxJSON(text string) []models.ProxyNode {
+	var cfg struct {
+		Outbounds []map[string]interface{} `json:"outbounds"`
+	}
+	if err := json.Unmarshal([]byte(text), &cfg); err != nil {
+		return nil
+	}
+	var nodes []models.ProxyNode
+	seen := make(map[string]bool)
+	for _, ob := range cfg.Outbounds {
+		typ, _ := ob["type"].(string)
+		if !isProxyType(typ) {
+			continue // 跳过 selector/urltest/direct/block/dns 等
+		}
+		server, _ := ob["server"].(string)
+		port := toInt(ob["server_port"])
+		if server == "" || port == 0 {
+			continue
+		}
+		tag, _ := ob["tag"].(string)
+		node := mkNode(tag, typ, server, port, "")
+		node.Config = ob // 原样复用 sing-box 出站配置
+		if seen[node.Tag] {
+			continue
+		}
+		seen[node.Tag] = true
+		nodes = append(nodes, node)
+	}
+	// 信息节点排最上面（与链接/YAML 格式一致）
+	var infoNodes, realNodes []models.ProxyNode
+	for _, n := range nodes {
+		if n.IsInfo {
+			infoNodes = append(infoNodes, n)
+		} else {
+			realNodes = append(realNodes, n)
+		}
+	}
+	return append(infoNodes, realNodes...)
 }
 
 // ── Clash YAML 订阅解析（链接格式解析不到时回退）──
