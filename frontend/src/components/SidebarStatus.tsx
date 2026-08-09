@@ -70,9 +70,11 @@ export default function SidebarStatus() {
     return () => clearInterval(poll)
   }, [])
 
-  // 版本号拼接前端构建时间，方便确认部署是否生效
+  // 版本号拼接前端构建时间，方便确认部署是否生效；
+  // 后端版本号已含相同构建日期时（build.sh 统一注入 BUILD_DATE）不重复显示
   const buildDate = import.meta.env.VITE_BUILD_DATE
-  const displayVersion = buildDate && buildDate !== 'unknown'
+  const versionHasDate = buildDate && buildDate !== 'unknown' && version.includes(buildDate)
+  const displayVersion = buildDate && buildDate !== 'unknown' && !versionHasDate
     ? `${version}  ⌂${buildDate}`
     : version
 
