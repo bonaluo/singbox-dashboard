@@ -27,14 +27,31 @@ export default function SubscriptionsPage() {
   const [mergeSources, setMergeSources] = useState<Set<string>>(new Set())
   const [mergeExtraUrl, setMergeExtraUrl] = useState('')
   const [useProxy, setUseProxy] = useState(false)
+  // 拉取 UA 设置（全局）
+  const [fetchUA, setFetchUA] = useState('')
+  const [uaSaved, setUaSaved] = useState(false)
 
   const loadSubs = useCallback(async () => {
     const r = await api('/api/subscriptions')
     if (r.ok) {
       setSubs(r.data.subscriptions || [])
       if (r.data.applied_id) setActiveSub(r.data.applied_id)
+      if (r.data.fetch_ua) setFetchUA(r.data.fetch_ua)
     }
   }, [])
+
+  const saveUA = async () => {
+    const r = await api('/api/subscriptions/ua', {
+      method: 'PUT',
+      body: JSON.stringify({ ua: fetchUA.trim() }),
+    })
+    if (r.ok) {
+      setUaSaved(true)
+      setTimeout(() => setUaSaved(false), 2000)
+    } else {
+      setSubMsg('❌ ' + (r.error || '保存失败'))
+    }
+  }
 
   useEffect(() => { loadSubs() }, [loadSubs])
 
@@ -167,6 +184,24 @@ export default function SubscriptionsPage() {
           <button onClick={() => setSubMsg('')} className="ml-auto text-red-400 hover:text-red-300 text-sm">✕</button>
         </div>
       )}
+
+      {/* 拉取 UA 设置（全局，作用于所有订阅拉取） */}
+      <div className="bg-[var(--surface)] rounded-xl p-4 mb-6 border border-[var(--border)]">
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-gray-400 shrink-0">🤖 拉取 User-Agent</span>
+          <input value={fetchUA} onChange={e => { setFetchUA(e.target.value); setUaSaved(false) }}
+            placeholder="mihomo.party/v2.0.0 (clash.meta)"
+            title="部分机场在 Cloudflare 上按 UA 拦截非订阅客户端，需使用订阅客户端 UA"
+            className="flex-1 bg-[#0f1419] border border-[var(--border)] rounded-lg px-3 py-2 text-sm font-mono" />
+          <button onClick={saveUA}
+            className="bg-[var(--accent)] text-white px-4 py-2 rounded-lg text-sm hover:opacity-90 shrink-0">
+            {uaSaved ? '✓ 已保存' : '保存'}
+          </button>
+        </div>
+        <div className="text-xs text-gray-500 mt-2">
+          留空则使用默认值；部分机场需订阅客户端 UA（如 mihomo/clash）才能拉取，被 Cloudflare 拦截时会返回 403 错误。
+        </div>
+      </div>
 
       <div className="bg-[var(--surface)] rounded-xl p-4 mb-6 border border-[var(--border)]">
         <div className="flex items-center justify-between mb-3">

@@ -38,6 +38,12 @@ var (
 	// Dashboard data dir
 	DataDir = envOrDefault("DASHBOARD_DATA_DIR", filepath.Join(homeDir(), ".hermes", "singbox-dashboard"))
 
+	// 订阅拉取代理（useProxy 时使用；设为 none/direct 可禁用）
+	FetchProxy = envOrDefault("FETCH_PROXY", "10.31.1.229:7890")
+
+	// 订阅拉取 User-Agent（部分机场在 Cloudflare 上按 UA 拦截非订阅客户端）
+	FetchUserAgent = envOrDefault("FETCH_USER_AGENT", "mihomo.party/v2.0.0 (clash.meta)")
+
 	// Server
 	ListenAddr = envOrDefault("LISTEN_ADDR", "0.0.0.0:9092")
 )

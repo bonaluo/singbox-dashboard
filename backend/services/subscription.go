@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"singbox-dashboard/config"
 	"singbox-dashboard/models"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -39,6 +40,27 @@ func LoadSubscriptions() (*models.SubscriptionStore, error) {
 		store.Subscriptions = []models.Subscription{}
 	}
 	return store, nil
+}
+
+// ── 订阅拉取 UA 设置 ──
+
+// LoadFetchUA 返回当前生效的订阅拉取 UA：优先用户保存的设置，未设置时回退默认值
+func LoadFetchUA() string {
+	store, err := LoadSubscriptions()
+	if err == nil && store.FetchUA != "" {
+		return store.FetchUA
+	}
+	return config.FetchUserAgent
+}
+
+// SaveFetchUA 保存全局订阅拉取 UA（空串恢复默认）
+func SaveFetchUA(ua string) error {
+	store, err := LoadSubscriptions()
+	if err != nil {
+		return err
+	}
+	store.FetchUA = ua
+	return SaveSubscriptions(store)
 }
 
 // ── 保存订阅列表 ──
@@ -127,28 +149,59 @@ type FetchResult struct {
 	UpdatedAt  string            `json:"updated_at"`
 }
 
-// fetchTransport 构造拉取用的 http.Transport；useProxy 时走 sing-box 本地代理
+// fetchTransport 构造拉取用的 http.Transport；useProxy 时走配置的代理（默认 10.31.1.229:7890）
 func fetchTransport(useProxy bool) *http.Transport {
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
 	if useProxy {
-		tr.Proxy = http.ProxyURL(&url.URL{Scheme: "http", Host: "127.0.0.1:2080"})
+		proxy := config.FetchProxy
+		switch proxy {
+		case "", "none", "direct":
+			// 禁用代理
+		default:
+			proxyURL := proxy
+			if !strings.Contains(proxyURL, "://") {
+				proxyURL = "http://" + proxyURL
+			}
+			if u, err := url.Parse(proxyURL); err == nil && u.Host != "" {
+				tr.Proxy = http.ProxyURL(u)
+			}
+		}
 	}
 	return tr
 }
 
-// FetchRaw 拉取订阅原始数据（不依赖已有记录）
-func FetchRaw(subURL string, useProxy bool) (string, error) {
+// fetchWithUA 拉取订阅原始数据：设置订阅客户端 UA 并检查 HTTP 状态码。
+// 部分机场在 Cloudflare 上按 UA 拦截非订阅客户端（curl/浏览器/Go 默认 UA 会 403）
+func fetchWithUA(subURL string, useProxy bool) ([]byte, error) {
 	client := &http.Client{Transport: fetchTransport(useProxy), Timeout: 30 * time.Second}
-	resp, err := client.Get(subURL)
+	req, err := http.NewRequest("GET", subURL, nil)
 	if err != nil {
-		return "", fmt.Errorf("拉取失败: %w", err)
+		return nil, fmt.Errorf("构造请求失败: %w", err)
+	}
+	req.Header.Set("User-Agent", LoadFetchUA())
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("拉取失败: %w", err)
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		hint := ""
+		if strings.Contains(string(body), "cloudflare") && strings.Contains(string(body), "blocked") {
+			hint = "（被 Cloudflare 拦截，可检查订阅是否到期/机场是否封禁了出口 IP）"
+		}
+		return nil, fmt.Errorf("订阅链接返回 HTTP %d%s", resp.StatusCode, hint)
+	}
+	return io.ReadAll(resp.Body)
+}
+
+// FetchRaw 拉取订阅原始数据（不依赖已有记录）
+func FetchRaw(subURL string, useProxy bool) (string, error) {
+	raw, err := fetchWithUA(subURL, useProxy)
 	if err != nil {
-		return "", fmt.Errorf("读取失败: %w", err)
+		return "", err
 	}
 	return string(raw), nil
 }
@@ -162,6 +215,9 @@ func ParseRaw(raw string) *FetchResult {
 	text := string(decoded)
 	lines := strings.Split(strings.TrimSpace(text), "\n")
 	nodes := parseSubscriptionLines(lines)
+	if len(nodes) == 0 {
+		nodes = parseClashSubscription(text)
+	}
 	result := &FetchResult{
 		RawText:   text,
 		RawLines:  lines,
@@ -206,16 +262,9 @@ func FetchAndParseSubscription(id string) (*FetchResult, error) {
 		raw = content
 	} else {
 		// 拉取（跳过 SSL 验证，兼容各种订阅服务商；按订阅设置决定是否走代理）
-		client := &http.Client{Transport: fetchTransport(useProxy), Timeout: 30 * time.Second}
-		resp, err := client.Get(subURL)
+		rawBytes, err := fetchWithUA(subURL, useProxy)
 		if err != nil {
-			return nil, fmt.Errorf("拉取失败: %w", err)
-		}
-		defer resp.Body.Close()
-
-		rawBytes, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return nil, fmt.Errorf("读取失败: %w", err)
+			return nil, err
 		}
 		raw = string(rawBytes)
 	}
@@ -230,8 +279,11 @@ func FetchAndParseSubscription(id string) (*FetchResult, error) {
 	text := string(decoded)
 	lines := strings.Split(strings.TrimSpace(text), "\n")
 
-	// 解析出节点
+	// 解析出节点（链接格式解析不到时回退到 Clash YAML 格式）
 	nodes := parseSubscriptionLines(lines)
+	if len(nodes) == 0 {
+		nodes = parseClashSubscription(text)
+	}
 
 	// 更新订阅
 	result := &FetchResult{
@@ -635,6 +687,523 @@ func ApplySubscription(id string) error {
 	ApplyGroupRules()
 	// 持久化已应用的订阅 ID（重启后前端可恢复标识）
 	return SaveAppliedSubscriptionID(id)
+}
+
+// ── Clash YAML 订阅解析（链接格式解析不到时回退）──
+
+// parseClashSubscription 解析 Clash YAML 格式订阅（顶层含 proxies: 列表），
+// 将每个 proxy 项映射为 sing-box 出站配置
+func parseClashSubscription(text string) []models.ProxyNode {
+	root, err := yamlParse(text)
+	if err != nil {
+		return nil
+	}
+	raw, ok := root["proxies"].([]interface{})
+	if !ok {
+		return nil
+	}
+	var nodes []models.ProxyNode
+	seen := make(map[string]bool)
+	for _, item := range raw {
+		p, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		node, ok := clashProxyToNode(p)
+		if !ok {
+			continue
+		}
+		key := node.Tag
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		nodes = append(nodes, node)
+	}
+	// 信息节点排到最上面（与链接格式一致）
+	var infoNodes, realNodes []models.ProxyNode
+	for _, n := range nodes {
+		if n.IsInfo {
+			infoNodes = append(infoNodes, n)
+		} else {
+			realNodes = append(realNodes, n)
+		}
+	}
+	return append(infoNodes, realNodes...)
+}
+
+// clashProxyToNode 将 Clash YAML proxy 项转为 ProxyNode（含 sing-box 出站配置）
+func clashProxyToNode(p map[string]interface{}) (models.ProxyNode, bool) {
+	name, _ := p["name"].(string)
+	typ, _ := p["type"].(string)
+	server, _ := p["server"].(string)
+	port := toInt(p["port"])
+	if name == "" || server == "" || port == 0 {
+		return models.ProxyNode{}, false
+	}
+
+	obType, ok := map[string]string{
+		"vmess": "vmess", "vless": "vless", "trojan": "trojan",
+		"hysteria2": "hysteria2", "hy2": "hysteria2", "hysteria": "hysteria",
+		"tuic": "tuic", "ss": "shadowsocks", "shadowsocks": "shadowsocks",
+	}[typ]
+	if !ok {
+		return models.ProxyNode{}, false
+	}
+
+	ob := map[string]interface{}{
+		"type":        obType,
+		"tag":         name,
+		"server":      server,
+		"server_port": port,
+	}
+
+	switch typ {
+	case "vless":
+		if uuid, _ := p["uuid"].(string); uuid != "" {
+			ob["uuid"] = uuid
+		}
+		if flow, _ := p["flow"].(string); flow != "" {
+			ob["flow"] = flow
+		}
+	case "vmess":
+		if uuid, _ := p["uuid"].(string); uuid != "" {
+			ob["uuid"] = uuid
+		}
+		if cipher, _ := p["cipher"].(string); cipher != "" && cipher != "auto" {
+			ob["security"] = cipher
+		} else {
+			ob["security"] = "auto"
+		}
+	case "trojan":
+		if pw, _ := p["password"].(string); pw != "" {
+			ob["password"] = pw
+		}
+	case "hysteria2", "hy2":
+		if pw, _ := p["password"].(string); pw != "" {
+			ob["password"] = pw
+		}
+		if obfs, _ := p["obfs"].(string); obfs != "" {
+			o := map[string]interface{}{"type": obfs}
+			if pw, _ := p["obfs-password"].(string); pw != "" {
+				o["password"] = pw
+			}
+			ob["obfs"] = o
+		}
+	case "hysteria":
+		if a, _ := p["auth"].(string); a != "" {
+			ob["auth"] = a
+		}
+		if a, _ := p["auth-str"].(string); a != "" {
+			ob["auth_str"] = a
+		}
+		if o, _ := p["obfs"].(string); o != "" {
+			ob["obfs"] = o
+		}
+	case "tuic":
+		if u, _ := p["uuid"].(string); u != "" {
+			ob["uuid"] = u
+		}
+		if pw, _ := p["password"].(string); pw != "" {
+			ob["password"] = pw
+		}
+		if cc, _ := p["congestion-controller"].(string); cc != "" {
+			ob["congestion_control"] = cc
+		}
+		if ur, _ := p["udp-relay-mode"].(string); ur != "" {
+			ob["udp_relay_mode"] = ur
+		}
+	case "shadowsocks", "ss":
+		if m, _ := p["cipher"].(string); m != "" {
+			ob["method"] = m
+		}
+		if pw, _ := p["password"].(string); pw != "" {
+			ob["password"] = pw
+		}
+		if plugin, _ := p["plugin"].(string); plugin != "" {
+			ob["plugin"] = clashSSPlugin(plugin, p)
+		}
+	}
+
+	// TLS / Reality
+	if tlsOn, _ := p["tls"].(bool); tlsOn {
+		t := map[string]interface{}{"enabled": true}
+		if sni, _ := p["servername"].(string); sni != "" {
+			t["server_name"] = sni
+		} else {
+			t["server_name"] = server
+		}
+		if sk, _ := p["skip-cert-verify"].(bool); sk {
+			t["insecure"] = true
+		}
+		if fp, _ := p["client-fingerprint"].(string); fp != "" {
+			t["utls"] = map[string]interface{}{"enabled": true, "fingerprint": fp}
+		}
+		if alpn, ok := p["alpn"].([]interface{}); ok {
+			if names := asStringSlice(alpn); len(names) > 0 {
+				t["alpn"] = names
+			}
+		}
+		// reality-opts 仅在 vmess/vless/trojan 下有意义
+		if typ == "vless" || typ == "vmess" || typ == "trojan" {
+			if ro, ok := p["reality-opts"].(map[string]interface{}); ok {
+				r := map[string]interface{}{"enabled": true}
+				if pbk, _ := ro["public-key"].(string); pbk != "" {
+					r["public_key"] = pbk
+				}
+				if sid, _ := ro["short-id"].(string); sid != "" {
+					r["short_id"] = sid
+				}
+				t["reality"] = r
+			}
+		}
+		ob["tls"] = t
+	}
+
+	// 传输层（ws / grpc / http / h2）
+	if tr := clashTransport(p); tr != nil {
+		ob["transport"] = tr
+	}
+
+	node := mkNode(name, typ, server, port, "")
+	node.Config = ob
+	return node, true
+}
+
+// clashTransport 将 Clash network + *-opts 映射为 sing-box transport
+func clashTransport(p map[string]interface{}) map[string]interface{} {
+	network, _ := p["network"].(string)
+	switch network {
+	case "ws":
+		tr := map[string]interface{}{"type": "ws"}
+		if o, ok := p["ws-opts"].(map[string]interface{}); ok {
+			if path, _ := o["path"].(string); path != "" {
+				tr["path"] = path
+			}
+			if hd, ok := o["headers"].(map[string]interface{}); ok {
+				if host, _ := hd["Host"].(string); host != "" {
+					tr["headers"] = map[string]interface{}{"Host": host}
+				}
+			}
+		}
+		return tr
+	case "grpc":
+		tr := map[string]interface{}{"type": "grpc"}
+		if o, ok := p["grpc-opts"].(map[string]interface{}); ok {
+			if sn, _ := o["grpc-service-name"].(string); sn != "" {
+				tr["service_name"] = strings.TrimPrefix(sn, "/")
+			}
+			if mode, _ := o["grpc-mode"].(string); mode == "multi" {
+				tr["multi_mode"] = true
+			}
+		}
+		return tr
+	case "http":
+		tr := map[string]interface{}{"type": "http"}
+		if o, ok := p["http-opts"].(map[string]interface{}); ok {
+			if path, _ := o["path"].(string); path != "" {
+				tr["path"] = path
+			}
+			if hd, ok := o["headers"].(map[string]interface{}); ok {
+				if host, _ := hd["Host"].(string); host != "" {
+					tr["host"] = strings.Split(host, ",")
+				}
+			}
+		}
+		return tr
+	case "h2":
+		// sing-box 无 h2 transport，近似映射到 httpupgrade
+		tr := map[string]interface{}{"type": "httpupgrade"}
+		if o, ok := p["h2-opts"].(map[string]interface{}); ok {
+			if path, _ := o["path"].(string); path != "" {
+				tr["path"] = path
+			}
+		}
+		return tr
+	}
+	return nil
+}
+
+// clashSSPlugin 将 Clash ss plugin 映射为 sing-box plugin 字符串（plugin;opts）
+func clashSSPlugin(plugin string, p map[string]interface{}) string {
+	switch plugin {
+	case "obfs":
+		plugin = "obfs-local"
+	case "v2ray-plugin":
+		// 类型名一致，直接使用
+	}
+	po, ok := p["plugin-opts"].(map[string]interface{})
+	if !ok {
+		return plugin
+	}
+	var parts []string
+	for _, kv := range [][2]string{{"mode", "obfs"}, {"host", "host"}, {"path", "path"}, {"tls", "tls"}} {
+		v, exists := po[kv[0]]
+		if !exists {
+			continue
+		}
+		switch vv := v.(type) {
+		case string:
+			if vv != "" {
+				if kv[1] == "obfs" {
+					parts = append(parts, "obfs="+vv)
+				} else {
+					parts = append(parts, kv[1]+"="+vv)
+				}
+			}
+		case bool:
+			if vv {
+				parts = append(parts, kv[1])
+			}
+		}
+	}
+	if len(parts) == 0 {
+		return plugin
+	}
+	return plugin + ";" + strings.Join(parts, ";")
+}
+
+// asStringSlice 将 []interface{}（YAML 解析出的字符串列表）转为 []string
+func asStringSlice(v []interface{}) []string {
+	out := make([]string, 0, len(v))
+	for _, item := range v {
+		if s, ok := item.(string); ok && s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// ── 迷你 YAML 解析器（仅覆盖 Clash 订阅所需子集，零依赖）──
+
+type yamlLine struct {
+	indent int
+	text   string
+}
+
+// yamlParse 将缩进式 YAML 解析为嵌套 map[string]interface{}。支持：
+// 注释、单双引号字符串、数字、布尔、null、列表项（- 前缀）、嵌套块；锚点忽略。
+func yamlParse(text string) (map[string]interface{}, error) {
+	var lines []yamlLine
+	for _, raw := range strings.Split(text, "\n") {
+		s := strings.TrimRight(raw, " \t")
+		if strings.TrimSpace(s) == "" {
+			continue
+		}
+		indent := len(s) - len(strings.TrimLeft(s, " \t"))
+		content := strings.TrimSpace(stripInlineComment(s))
+		if content == "" || strings.HasPrefix(content, "#") || strings.HasPrefix(content, "&") {
+			continue // 空行、注释行、锚点行
+		}
+		lines = append(lines, yamlLine{indent: indent, text: content})
+	}
+	if len(lines) == 0 {
+		return nil, fmt.Errorf("empty yaml")
+	}
+	v, next, err := yamlParseBlock(lines, 0, lines[0].indent)
+	if err != nil {
+		return nil, err
+	}
+	_ = next
+	m, ok := v.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("top level is not a map")
+	}
+	return m, nil
+}
+
+// stripInlineComment 去除行内注释（# 前有空白且在引号外）
+func stripInlineComment(s string) string {
+	var quote byte
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if quote != 0 {
+			if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		if c == '\'' || c == '"' {
+			quote = c
+			continue
+		}
+		if c == '#' && i > 0 && (s[i-1] == ' ' || s[i-1] == '\t') {
+			return s[:i]
+		}
+	}
+	return s
+}
+
+// isListLine 判断是否为列表项行（- 前缀）
+func isListLine(l yamlLine) bool {
+	return len(l.text) > 0 && l.text[0] == '-' && (len(l.text) == 1 || l.text[1] == ' ')
+}
+
+// yamlParseBlock 从 lines[start] 起解析缩进为 indent 的块（map 或 list），
+// 返回解析值、下一行下标、错误
+func yamlParseBlock(lines []yamlLine, start, indent int) (interface{}, int, error) {
+	if start >= len(lines) {
+		return nil, start, nil
+	}
+	if lines[start].indent != indent {
+		return nil, start, fmt.Errorf("unexpected indent at line %d", start)
+	}
+	if isListLine(lines[start]) {
+		return yamlParseList(lines, start, indent)
+	}
+
+	// map
+	m := make(map[string]interface{})
+	i := start
+	for i < len(lines) && lines[i].indent == indent {
+		key, value, inline := yamlSplitKeyValue(lines[i].text)
+		if key == "" {
+			return nil, i, fmt.Errorf("invalid line: %s", lines[i].text)
+		}
+		if inline {
+			m[key] = yamlParseScalar(value)
+			i++
+			continue
+		}
+		// 无内联值：嵌套块（含与键同缩进的列表行，Clash 生成风格）或 null
+		if i+1 < len(lines) && (lines[i+1].indent > indent ||
+			(lines[i+1].indent == indent && isListLine(lines[i+1]))) {
+			childIndent := lines[i+1].indent
+			cv, ni, err := yamlParseBlock(lines, i+1, childIndent)
+			if err != nil {
+				return nil, i, err
+			}
+			m[key] = cv
+			i = ni
+		} else {
+			m[key] = nil
+			i++
+		}
+	}
+	return m, i, nil
+}
+
+// yamlParseList 解析列表块（- 前缀行），支持 "- key: value" 内联 map 项
+func yamlParseList(lines []yamlLine, start, indent int) ([]interface{}, int, error) {
+	var list []interface{}
+	i := start
+	for i < len(lines) && lines[i].indent == indent &&
+		strings.HasPrefix(lines[i].text, "-") &&
+		(len(lines[i].text) == 1 || lines[i].text[1] == ' ') {
+		item := strings.TrimSpace(lines[i].text[1:])
+		if item == "" {
+			// "-" 独占一行：元素在下一层
+			i++
+			if i >= len(lines) {
+				list = append(list, nil)
+				break
+			}
+			v, ni, err := yamlParseBlock(lines, i, lines[i].indent)
+			if err != nil {
+				return nil, i, err
+			}
+			list = append(list, v)
+			i = ni
+			continue
+		}
+		if idx := yamlKeyIndex(item); idx >= 0 {
+			// "- key: ..."：该项为 map，后续缩进更深的键行并入
+			m := make(map[string]interface{})
+			key := item[:idx]
+			rest := strings.TrimSpace(item[idx+1:])
+			if rest == "" {
+				if i+1 < len(lines) && lines[i+1].indent > indent {
+					childIndent := lines[i+1].indent
+					cv, ni, err := yamlParseBlock(lines, i+1, childIndent)
+					if err != nil {
+						return nil, i, err
+					}
+					m[key] = cv
+					i = ni
+				} else {
+					m[key] = nil
+					i++
+				}
+			} else {
+				m[key] = yamlParseScalar(rest)
+				i++
+			}
+			// 吸收同 map 的后续键行（缩进 > list indent）
+			if i < len(lines) && lines[i].indent > indent {
+				childIndent := lines[i].indent
+				extra, ni, err := yamlParseBlock(lines, i, childIndent)
+				if err != nil {
+					return nil, i, err
+				}
+				if em, ok := extra.(map[string]interface{}); ok {
+					for ek, ev := range em {
+						m[ek] = ev
+					}
+				}
+				i = ni
+			}
+			list = append(list, m)
+			continue
+		}
+		list = append(list, yamlParseScalar(item))
+		i++
+	}
+	return list, i, nil
+}
+
+// yamlKeyIndex 返回 "key: value" / "key:" 中分隔冒号的下标；非键值行返回 -1
+func yamlKeyIndex(s string) int {
+	if s == "" || s[0] == '\'' || s[0] == '"' || s[0] == '-' {
+		return -1
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] == ':' && (i+1 == len(s) || s[i+1] == ' ') {
+			return i
+		}
+	}
+	return -1
+}
+
+// yamlSplitKeyValue 拆分键值行，返回 (key, value, 是否有内联值)
+func yamlSplitKeyValue(s string) (string, string, bool) {
+	idx := yamlKeyIndex(s)
+	if idx < 0 {
+		return "", "", false
+	}
+	rest := strings.TrimSpace(s[idx+1:])
+	return strings.TrimSpace(s[:idx]), rest, rest != ""
+}
+
+// yamlParseScalar 解析标量值：引号字符串、数字、布尔、null；其余原样返回字符串
+func yamlParseScalar(s string) interface{} {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	if len(s) >= 2 && s[0] == '\'' && s[len(s)-1] == '\'' {
+		return strings.ReplaceAll(s[1:len(s)-1], "''", "'")
+	}
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		if d, err := strconv.Unquote(s); err == nil {
+			return d
+		}
+		return s[1 : len(s)-1]
+	}
+	switch s {
+	case "true":
+		return true
+	case "false":
+		return false
+	case "null", "~":
+		return nil
+	}
+	if i, err := strconv.Atoi(s); err == nil {
+		return i
+	}
+	if strings.HasPrefix(s, "*") {
+		return nil // YAML 别名，无法解析
+	}
+	return s
 }
 
 // ── 解析订阅链接（vmess / vless / trojan / hysteria2 / hysteria / tuic / ss）──
@@ -1057,7 +1626,7 @@ func mkNode(tag, typ, server string, port int, line string) models.ProxyNode {
 
 // isInfoNode 信息节点：tag 含流量/套餐/到期/剩余/过滤等非代理关键字
 func isInfoNode(tag string) bool {
-	for _, kw := range []string{"流量", "套餐", "到期", "剩余", "过滤"} {
+	for _, kw := range []string{"流量", "套餐", "到期", "剩余", "过滤", "官网"} {
 		if strings.Contains(tag, kw) {
 			return true
 		}
@@ -1259,6 +1828,10 @@ func decodeSS(s string) ([]byte, error) {
 
 func toInt(v interface{}) int {
 	switch val := v.(type) {
+	case int:
+		return val
+	case int64:
+		return int(val)
 	case float64:
 		return int(val)
 	case string:

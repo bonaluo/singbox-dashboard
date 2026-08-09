@@ -38,6 +38,8 @@ type Subscription struct {
 
 type SubscriptionStore struct {
 	Subscriptions []Subscription `json:"subscriptions"`
+	// FetchUA 全局订阅拉取 User-Agent；为空时回退到 config.FetchUserAgent 默认值
+	FetchUA string `json:"fetch_ua,omitempty"`
 }
 
 // ── Proxy Node (parsed from vmess:// / vless:// / trojan:// etc) ──

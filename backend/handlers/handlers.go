@@ -28,6 +28,7 @@ func Register(mux *http.ServeMux) {
 	// ── 订阅 ──
 	mux.HandleFunc("GET /api/subscriptions", handleListSubscriptions)
 	mux.HandleFunc("GET /api/subscriptions/applied", handleGetAppliedSubscription)
+	mux.HandleFunc("PUT /api/subscriptions/ua", handleSetFetchUA)
 	mux.HandleFunc("POST /api/subscriptions", handleAddSubscription)
 	mux.HandleFunc("DELETE /api/subscriptions/{id}", handleDeleteSubscription)
 	mux.HandleFunc("POST /api/subscriptions/{id}/fetch", handleFetchSubscription)
@@ -163,7 +164,18 @@ func handleListSubscriptions(w http.ResponseWriter, r *http.Request) {
 	sendOK(w, map[string]interface{}{
 		"subscriptions": store.Subscriptions,
 		"applied_id":    appliedID,
+		"fetch_ua":      services.LoadFetchUA(),
 	})
+}
+
+func handleSetFetchUA(w http.ResponseWriter, r *http.Request) {
+	body := readBody(r)
+	ua, _ := body["ua"].(string)
+	if err := services.SaveFetchUA(ua); err != nil {
+		sendError(w, 500, err.Error())
+		return
+	}
+	sendOK(w, map[string]string{"ua": services.LoadFetchUA()})
 }
 
 func handleGetAppliedSubscription(w http.ResponseWriter, r *http.Request) {

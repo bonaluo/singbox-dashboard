@@ -10,3 +10,4 @@ data/
 .claude/
 docker-compose.override.yml
 docker-compose.dev.override.yml
+.tmp/
