@@ -27,8 +27,9 @@ export default function SubscriptionsPage() {
   const [mergeSources, setMergeSources] = useState<Set<string>>(new Set())
   const [mergeExtraUrl, setMergeExtraUrl] = useState('')
   const [useProxy, setUseProxy] = useState(false)
-  // 拉取 UA 设置（全局）
+  // 拉取设置（全局）：UA + 外部代理
   const [fetchUA, setFetchUA] = useState('')
+  const [fetchProxy, setFetchProxy] = useState('')
   const [uaSaved, setUaSaved] = useState(false)
 
   const loadSubs = useCallback(async () => {
@@ -37,13 +38,14 @@ export default function SubscriptionsPage() {
       setSubs(r.data.subscriptions || [])
       if (r.data.applied_id) setActiveSub(r.data.applied_id)
       if (r.data.fetch_ua) setFetchUA(r.data.fetch_ua)
+      if (r.data.fetch_proxy) setFetchProxy(r.data.fetch_proxy)
     }
   }, [])
 
-  const saveUA = async () => {
-    const r = await api('/api/subscriptions/ua', {
+  const saveFetchSettings = async () => {
+    const r = await api('/api/subscriptions/fetch-settings', {
       method: 'PUT',
-      body: JSON.stringify({ ua: fetchUA.trim() }),
+      body: JSON.stringify({ ua: fetchUA.trim(), proxy: fetchProxy.trim() }),
     })
     if (r.ok) {
       setUaSaved(true)
@@ -185,24 +187,6 @@ export default function SubscriptionsPage() {
         </div>
       )}
 
-      {/* 拉取 UA 设置（全局，作用于所有订阅拉取） */}
-      <div className="bg-[var(--surface)] rounded-xl p-4 mb-6 border border-[var(--border)]">
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-gray-400 shrink-0">🤖 拉取 User-Agent</span>
-          <input value={fetchUA} onChange={e => { setFetchUA(e.target.value); setUaSaved(false) }}
-            placeholder="mihomo.party/v2.0.0 (clash.meta)"
-            title="部分机场在 Cloudflare 上按 UA 拦截非订阅客户端，需使用订阅客户端 UA"
-            className="flex-1 bg-[#0f1419] border border-[var(--border)] rounded-lg px-3 py-2 text-sm font-mono" />
-          <button onClick={saveUA}
-            className="bg-[var(--accent)] text-white px-4 py-2 rounded-lg text-sm hover:opacity-90 shrink-0">
-            {uaSaved ? '✓ 已保存' : '保存'}
-          </button>
-        </div>
-        <div className="text-xs text-gray-500 mt-2">
-          留空则使用默认值；部分机场需订阅客户端 UA（如 mihomo/clash）才能拉取，被 Cloudflare 拦截时会返回 403 错误。
-        </div>
-      </div>
-
       <div className="bg-[var(--surface)] rounded-xl p-4 mb-6 border border-[var(--border)]">
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-semibold">添加订阅</h3>
@@ -230,26 +214,45 @@ export default function SubscriptionsPage() {
               className="flex-[2] bg-[#0f1419] border border-[var(--border)] rounded-lg px-3 py-2 text-sm cursor-pointer select-none" />
           )}
         </div>
-        <div className="flex items-center justify-between">
-          <button onClick={() => setUseProxy(!useProxy)}
-            title="拉取订阅时是否走 sing-box 代理"
-            className={`px-3 py-2 rounded-lg text-sm shrink-0 transition-colors ${
-              useProxy
-                ? 'bg-amber-500/15 text-amber-400 border border-amber-500/40'
-                : 'bg-[#0f1419] text-gray-400 border border-[var(--border)]'
-            }`}>
-            {useProxy ? '🟠 代理' : '⚪ 直连'}
-          </button>
-          <div className="flex gap-2">
-            <button onClick={addSub} disabled={loading}
-              className="bg-[var(--accent)] text-white px-4 py-2 rounded-lg text-sm hover:opacity-90 disabled:opacity-50">
-              {loading ? '验证中...' : '添加订阅'}
-            </button>
-            <button onClick={() => setShowMerge(!showMerge)}
-              className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm hover:opacity-90">
-              {showMerge ? '取消聚合' : '📎 创建聚合订阅'}
-            </button>
+        <label className="flex items-center gap-2 cursor-pointer mb-3 select-none"
+          title="勾选：拉取订阅走代理（优先外部代理，未配置则走容器内 sing-box 当前订阅节点）；不勾选：直连">
+          <input type="checkbox" checked={useProxy} onChange={e => setUseProxy(e.target.checked)}
+            className="w-4 h-4 accent-[var(--accent)]" />
+          <span className="text-sm text-gray-300">使用代理拉取</span>
+          <span className="text-xs text-gray-500">（未配置外部代理时走容器内 sing-box 当前订阅节点）</span>
+        </label>
+
+        {/* 拉取设置（全局）：UA + 外部代理 */}
+        <div className="flex items-end gap-3 mb-4">
+          <div className="flex-1">
+            <label className="text-xs text-gray-500 mb-1 block">User-Agent（留空使用默认）</label>
+            <input value={fetchUA} onChange={e => { setFetchUA(e.target.value); setUaSaved(false) }}
+              placeholder="mihomo.party/v2.0.0 (clash.meta)"
+              title="部分机场在 Cloudflare 上按 UA 拦截非订阅客户端，需使用订阅客户端 UA"
+              className="w-full bg-[#0f1419] border border-[var(--border)] rounded-lg px-3 py-2 text-sm font-mono" />
           </div>
+          <div className="flex-1">
+            <label className="text-xs text-gray-500 mb-1 block">外部代理（可选）</label>
+            <input value={fetchProxy} onChange={e => { setFetchProxy(e.target.value); setUaSaved(false) }}
+              placeholder="http://172.17.0.1:7890 或 http://<宿主机IP>:7890"
+              title="容器内 sing-box 无可用订阅/节点时（首次使用），可配置宿主机或其他机器的代理用于拉取订阅"
+              className="w-full bg-[#0f1419] border border-[var(--border)] rounded-lg px-3 py-2 text-sm font-mono" />
+          </div>
+          <button onClick={saveFetchSettings}
+            className="bg-[var(--accent)] text-white px-4 py-2 rounded-lg text-sm hover:opacity-90 shrink-0">
+            {uaSaved ? '✓ 已保存' : '保存设置'}
+          </button>
+        </div>
+
+        <div className="flex items-center justify-end gap-2">
+          <button onClick={addSub} disabled={loading}
+            className="bg-[var(--accent)] text-white px-4 py-2 rounded-lg text-sm hover:opacity-90 disabled:opacity-50">
+            {loading ? '验证中...' : '添加订阅'}
+          </button>
+          <button onClick={() => setShowMerge(!showMerge)}
+            className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm hover:opacity-90">
+            {showMerge ? '取消聚合' : '📎 创建聚合订阅'}
+          </button>
         </div>
       </div>
 

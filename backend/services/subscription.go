@@ -63,6 +63,26 @@ func SaveFetchUA(ua string) error {
 	return SaveSubscriptions(store)
 }
 
+// LoadFetchProxy 返回当前生效的订阅拉取外部代理：
+// 优先页面保存的设置，未设置时回退到环境变量/config 默认（默认为空）
+func LoadFetchProxy() string {
+	store, err := LoadSubscriptions()
+	if err == nil && store.FetchProxy != "" {
+		return store.FetchProxy
+	}
+	return config.FetchProxy
+}
+
+// SaveFetchProxy 保存全局订阅拉取外部代理（空串表示不配置，走容器内 sing-box）
+func SaveFetchProxy(proxy string) error {
+	store, err := LoadSubscriptions()
+	if err != nil {
+		return err
+	}
+	store.FetchProxy = proxy
+	return SaveSubscriptions(store)
+}
+
 // ── 保存订阅列表 ──
 
 func SaveSubscriptions(store *models.SubscriptionStore) error {
@@ -149,25 +169,34 @@ type FetchResult struct {
 	UpdatedAt  string            `json:"updated_at"`
 }
 
-// fetchTransport 构造拉取用的 http.Transport；useProxy 时走配置的代理（默认 10.31.1.229:7890）
+// fetchTransport 构造拉取用的 http.Transport。
+// useProxy=true 时：优先走用户配置的外部代理（页面设置 > 环境变量），
+// 未配置外部代理则走容器内 sing-box 内置代理（mixed 端口 2080，即当前订阅的节点出口）。
+// useProxy=false（直连）时不经过任何代理。
+// 注意：Go 的 http.Transport 在 Proxy 为 nil 时会回落读取 HTTP_PROXY/HTTPS_PROXY 环境变量，
+// 因此直连时也必须显式设置返回 nil 的 Proxy 函数，确保不受容器环境变量影响。
 func fetchTransport(useProxy bool) *http.Transport {
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
 	if useProxy {
-		proxy := config.FetchProxy
+		proxy := LoadFetchProxy()
 		switch proxy {
 		case "", "none", "direct":
-			// 禁用代理
-		default:
-			proxyURL := proxy
-			if !strings.Contains(proxyURL, "://") {
-				proxyURL = "http://" + proxyURL
-			}
-			if u, err := url.Parse(proxyURL); err == nil && u.Host != "" {
-				tr.Proxy = http.ProxyURL(u)
-			}
+			// 未配置外部代理：走容器内 sing-box 内置代理
+			proxy = "http://127.0.0.1:2080"
 		}
+		proxyURL := proxy
+		if !strings.Contains(proxyURL, "://") {
+			proxyURL = "http://" + proxyURL
+		}
+		if u, err := url.Parse(proxyURL); err == nil && u.Host != "" {
+			tr.Proxy = http.ProxyURL(u)
+		}
+	}
+	// 直连（或代理地址解析失败）：显式禁用环境变量代理
+	if tr.Proxy == nil {
+		tr.Proxy = func(*http.Request) (*url.URL, error) { return nil, nil }
 	}
 	return tr
 }

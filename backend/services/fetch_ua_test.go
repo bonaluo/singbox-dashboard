@@ -29,3 +29,35 @@ func TestFetchUASetting(t *testing.T) {
 		t.Errorf("清空后 UA = %q, 期望回退默认 %q", got, config.FetchUserAgent)
 	}
 }
+
+func TestFetchProxySetting(t *testing.T) {
+	t.Setenv("DASHBOARD_DATA_DIR", t.TempDir())
+	t.Setenv("FETCH_PROXY", "") // 隔离宿主机环境变量
+
+	// 未设置时为空（走容器内 sing-box 内置代理）
+	if got := LoadFetchProxy(); got != "" {
+		t.Errorf("默认外部代理 = %q, 期望空", got)
+	}
+
+	// 保存后生效
+	if err := SaveFetchProxy("http://10.0.0.1:7890"); err != nil {
+		t.Fatal(err)
+	}
+	if got := LoadFetchProxy(); got != "http://10.0.0.1:7890" {
+		t.Errorf("保存后外部代理 = %q", got)
+	}
+
+	// 清空恢复
+	if err := SaveFetchProxy(""); err != nil {
+		t.Fatal(err)
+	}
+	if got := LoadFetchProxy(); got != "" {
+		t.Errorf("清空后外部代理 = %q, 期望空", got)
+	}
+
+	// 未保存时回退到进程启动时的配置值（config.FetchProxy 在启动时读一次 FETCH_PROXY，
+	// 测试内 Setenv 不影响已初始化的包级变量，故此处验证回退值与配置一致即可）
+	if got := LoadFetchProxy(); got != config.FetchProxy {
+		t.Errorf("未保存时回退 = %q, 期望配置值 %q", got, config.FetchProxy)
+	}
+}

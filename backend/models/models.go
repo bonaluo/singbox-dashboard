@@ -40,6 +40,9 @@ type SubscriptionStore struct {
 	Subscriptions []Subscription `json:"subscriptions"`
 	// FetchUA 全局订阅拉取 User-Agent；为空时回退到 config.FetchUserAgent 默认值
 	FetchUA string `json:"fetch_ua,omitempty"`
+	// FetchProxy 全局订阅拉取外部代理（如 http://宿主机IP:7890）；
+	// 为空时 useProxy 走容器内 sing-box 内置代理，可回退到 config.FetchProxy
+	FetchProxy string `json:"fetch_proxy,omitempty"`
 }
 
 // ── Proxy Node (parsed from vmess:// / vless:// / trojan:// etc) ──

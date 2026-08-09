@@ -29,6 +29,8 @@ func Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/subscriptions", handleListSubscriptions)
 	mux.HandleFunc("GET /api/subscriptions/applied", handleGetAppliedSubscription)
 	mux.HandleFunc("PUT /api/subscriptions/ua", handleSetFetchUA)
+	mux.HandleFunc("PUT /api/subscriptions/proxy", handleSetFetchProxy)
+	mux.HandleFunc("PUT /api/subscriptions/fetch-settings", handleSetFetchSettings)
 	mux.HandleFunc("POST /api/subscriptions", handleAddSubscription)
 	mux.HandleFunc("DELETE /api/subscriptions/{id}", handleDeleteSubscription)
 	mux.HandleFunc("POST /api/subscriptions/{id}/fetch", handleFetchSubscription)
@@ -165,6 +167,7 @@ func handleListSubscriptions(w http.ResponseWriter, r *http.Request) {
 		"subscriptions": store.Subscriptions,
 		"applied_id":    appliedID,
 		"fetch_ua":      services.LoadFetchUA(),
+		"fetch_proxy":   services.LoadFetchProxy(),
 	})
 }
 
@@ -176,6 +179,35 @@ func handleSetFetchUA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sendOK(w, map[string]string{"ua": services.LoadFetchUA()})
+}
+
+func handleSetFetchProxy(w http.ResponseWriter, r *http.Request) {
+	body := readBody(r)
+	proxy, _ := body["proxy"].(string)
+	if err := services.SaveFetchProxy(proxy); err != nil {
+		sendError(w, 500, err.Error())
+		return
+	}
+	sendOK(w, map[string]string{"proxy": services.LoadFetchProxy()})
+}
+
+// handleSetFetchSettings 合并保存拉取设置（UA + 外部代理，一次请求）
+func handleSetFetchSettings(w http.ResponseWriter, r *http.Request) {
+	body := readBody(r)
+	ua, _ := body["ua"].(string)
+	proxy, _ := body["proxy"].(string)
+	if err := services.SaveFetchUA(ua); err != nil {
+		sendError(w, 500, err.Error())
+		return
+	}
+	if err := services.SaveFetchProxy(proxy); err != nil {
+		sendError(w, 500, err.Error())
+		return
+	}
+	sendOK(w, map[string]interface{}{
+		"ua":    services.LoadFetchUA(),
+		"proxy": services.LoadFetchProxy(),
+	})
 }
 
 func handleGetAppliedSubscription(w http.ResponseWriter, r *http.Request) {
