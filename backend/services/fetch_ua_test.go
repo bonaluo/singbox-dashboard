@@ -6,7 +6,7 @@ import (
 )
 
 func TestFetchUASetting(t *testing.T) {
-	t.Setenv("DASHBOARD_DATA_DIR", t.TempDir()) // 隔离数据目录，避免污染真实数据
+	config.SetDataDirForTest(t.TempDir()) // 隔离数据目录，避免污染真实数据
 
 	// 未设置时回退到默认值
 	if got := LoadFetchUA(); got != config.FetchUserAgent {
@@ -31,8 +31,8 @@ func TestFetchUASetting(t *testing.T) {
 }
 
 func TestFetchProxySetting(t *testing.T) {
-	t.Setenv("DASHBOARD_DATA_DIR", t.TempDir())
-	t.Setenv("FETCH_PROXY", "") // 隔离宿主机环境变量
+	config.SetDataDirForTest(t.TempDir())
+	t.Setenv("FETCH_PROXY", "") // 隔离宿主机环境变量（config.FetchProxy 初始化后不更新，此处仅确保测试确定性）
 
 	// 未设置时为空（走容器内 sing-box 内置代理）
 	if got := LoadFetchProxy(); got != "" {

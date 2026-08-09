@@ -11,7 +11,9 @@ export default function SubscriptionsPage() {
   // 内容粘贴弹窗
   const [showContentModal, setShowContentModal] = useState(false)
   const [modalContent, setModalContent] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(false)           // 添加订阅验证中
+  const [updatingId, setUpdatingId] = useState<string | null>(null) // 正在更新的订阅
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null) // 删除确认弹窗
   const [activeSub, setActiveSub] = useState<string | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [cachedData, setCachedData] = useState<Record<string, any>>({})
@@ -19,6 +21,20 @@ export default function SubscriptionsPage() {
   // 编辑内容型订阅（更新时粘贴新内容）
   const [editContentId, setEditContentId] = useState<string | null>(null)
   const [editContent, setEditContent] = useState('')
+  // 编辑订阅（弹窗：名称/UA/外部代理/使用代理）
+  const [editSub, setEditSub] = useState<any | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editUA, setEditUA] = useState('')
+  const [editProxy, setEditProxy] = useState('')
+  const [editUseProxy, setEditUseProxy] = useState(false)
+
+  const openEditSub = (sub: any) => {
+    setEditSub(sub)
+    setEditName(sub.name || '')
+    setEditUA(sub.fetch_ua || '')
+    setEditProxy(sub.external_proxy || '')
+    setEditUseProxy(!!sub.use_proxy)
+  }
 
   // 聚合相关
   const [showMerge, setShowMerge] = useState(false)
@@ -30,7 +46,10 @@ export default function SubscriptionsPage() {
   // 拉取设置（全局）：UA + 外部代理
   const [fetchUA, setFetchUA] = useState('')
   const [fetchProxy, setFetchProxy] = useState('')
-  const [uaSaved, setUaSaved] = useState(false)
+  const [uaSaved, setUaSaved] = useState('') // '' | 'ua' | 'proxy' 最近保存成功的项
+  // 订阅级拉取设置（添加订阅时）
+  const [subUA, setSubUA] = useState('')
+  const [subProxy, setSubProxy] = useState('')
 
   const loadSubs = useCallback(async () => {
     const r = await api('/api/subscriptions')
@@ -42,14 +61,36 @@ export default function SubscriptionsPage() {
     }
   }, [])
 
-  const saveFetchSettings = async () => {
-    const r = await api('/api/subscriptions/fetch-settings', {
-      method: 'PUT',
-      body: JSON.stringify({ ua: fetchUA.trim(), proxy: fetchProxy.trim() }),
-    })
+  const saveFetchSettings = async (kind: 'ua' | 'proxy') => {
+    const path = kind === 'ua' ? '/api/subscriptions/ua' : '/api/subscriptions/proxy'
+    const body = kind === 'ua'
+      ? { ua: fetchUA.trim() }
+      : { proxy: fetchProxy.trim() }
+    const r = await api(path, { method: 'PUT', body: JSON.stringify(body) })
     if (r.ok) {
-      setUaSaved(true)
-      setTimeout(() => setUaSaved(false), 2000)
+      setUaSaved(kind)
+      setTimeout(() => setUaSaved(''), 2000)
+    } else {
+      setSubMsg('❌ ' + (r.error || '保存失败'))
+    }
+  }
+
+  const saveEditSub = async () => {
+    if (!editSub) return
+    setLoading(true)
+    const r = await api(`/api/subscriptions/${editSub.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        name: editName.trim(),
+        fetch_ua: editUA.trim(),
+        external_proxy: editProxy.trim(),
+        use_proxy: editUseProxy,
+      }),
+    })
+    setLoading(false)
+    if (r.ok) {
+      setEditSub(null)
+      await loadSubs()
     } else {
       setSubMsg('❌ ' + (r.error || '保存失败'))
     }
@@ -62,7 +103,10 @@ export default function SubscriptionsPage() {
     if (inputMode === 'link' && !url) return
     if (inputMode === 'content' && !content) return
     setLoading(true)
-    const payload: Record<string, any> = { name, use_proxy: useProxy }
+    const payload: Record<string, any> = {
+      name, use_proxy: useProxy,
+      fetch_ua: subUA.trim(), external_proxy: subProxy.trim(),
+    }
     if (inputMode === 'link') payload.url = url
     else payload.content = content
     const r = await api('/api/subscriptions', {
@@ -72,7 +116,7 @@ export default function SubscriptionsPage() {
     if (r.ok) {
       const sub = r.data.subscription
       const result = r.data.result
-      setName(''); setUrl(''); setContent('')
+      setName(''); setUrl(''); setContent(''); setSubUA(''); setSubProxy(''); setUseProxy(false)
       setCachedData(prev => ({ ...prev, [sub.id]: result }))
       setExpandedId(sub.id)
       await loadSubs()
@@ -90,14 +134,14 @@ export default function SubscriptionsPage() {
       setEditContent(sub.content)
       return
     }
-    setLoading(true)
+    setUpdatingId(id)
     const r = await api(`/api/subscriptions/${id}/fetch`, { method: 'POST' })
+    setUpdatingId(null)
     if (r.ok) {
       setCachedData(prev => ({ ...prev, [id]: r.data }))
       setExpandedId(id)
     }
     await loadSubs()
-    setLoading(false)
   }
 
   const saveEditContent = async (id: string) => {
@@ -119,6 +163,7 @@ export default function SubscriptionsPage() {
 
   const deleteSub = async (id: string) => {
     await api(`/api/subscriptions/${id}`, { method: 'DELETE' })
+    setDeleteConfirmId(null)
     setCachedData(prev => { const n = { ...prev }; delete n[id]; return n })
     setActiveSub(null)
     loadSubs()
@@ -214,34 +259,61 @@ export default function SubscriptionsPage() {
               className="flex-[2] bg-[#0f1419] border border-[var(--border)] rounded-lg px-3 py-2 text-sm cursor-pointer select-none" />
           )}
         </div>
-        <label className="flex items-center gap-2 cursor-pointer mb-3 select-none"
-          title="勾选：拉取订阅走代理（优先外部代理，未配置则走容器内 sing-box 当前订阅节点）；不勾选：直连">
-          <input type="checkbox" checked={useProxy} onChange={e => setUseProxy(e.target.checked)}
-            className="w-4 h-4 accent-[var(--accent)]" />
-          <span className="text-sm text-gray-300">使用代理拉取</span>
-          <span className="text-xs text-gray-500">（未配置外部代理时走容器内 sing-box 当前订阅节点）</span>
-        </label>
+        {/* ── UA 设置：本订阅 + 全局 ── */}
+        <div className="rounded-lg border border-[var(--border)] p-3 mb-3">
+          <div className="text-xs font-semibold text-gray-400 mb-2">🤖 User-Agent 设置</div>
+          <div className="flex items-end gap-3 mb-2">
+            <div className="flex-1">
+              <label className="text-xs text-gray-500 mb-1 block">本订阅（留空使用全局）</label>
+              <input value={subUA} onChange={e => setSubUA(e.target.value)}
+                placeholder="mihomo.party/v2.0.0 (clash.meta)"
+                className="w-full bg-[#0f1419] border border-[var(--border)] rounded-lg px-3 py-2 text-sm font-mono" />
+            </div>
+            <div className="flex-1">
+              <label className="text-xs text-gray-500 mb-1 block">全局（作用于所有订阅，留空使用默认）</label>
+              <input value={fetchUA} onChange={e => { setFetchUA(e.target.value); setUaSaved('') }}
+                placeholder="mihomo.party/v2.0.0 (clash.meta)"
+                title="部分机场在 Cloudflare 上按 UA 拦截非订阅客户端，需使用订阅客户端 UA"
+                className="w-full bg-[#0f1419] border border-[var(--border)] rounded-lg px-3 py-2 text-sm font-mono" />
+            </div>
+            <button onClick={() => saveFetchSettings('ua')}
+              className="bg-[var(--accent)] text-white px-4 py-2 rounded-lg text-sm hover:opacity-90 shrink-0">
+              {uaSaved === 'ua' ? '✓ 已保存' : '保存 UA'}
+            </button>
+          </div>
+        </div>
 
-        {/* 拉取设置（全局）：UA + 外部代理 */}
-        <div className="flex items-end gap-3 mb-4">
-          <div className="flex-1">
-            <label className="text-xs text-gray-500 mb-1 block">User-Agent（留空使用默认）</label>
-            <input value={fetchUA} onChange={e => { setFetchUA(e.target.value); setUaSaved(false) }}
-              placeholder="mihomo.party/v2.0.0 (clash.meta)"
-              title="部分机场在 Cloudflare 上按 UA 拦截非订阅客户端，需使用订阅客户端 UA"
-              className="w-full bg-[#0f1419] border border-[var(--border)] rounded-lg px-3 py-2 text-sm font-mono" />
+        {/* ── 代理设置：勾选框 + 本订阅 + 全局 ── */}
+        <div className="rounded-lg border border-[var(--border)] p-3 mb-4">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-xs font-semibold text-gray-400">🛡️ 代理设置</span>
+            <label className="flex items-center gap-1.5 cursor-pointer select-none ml-2"
+              title="勾选：拉取订阅走代理；不勾选：直连">
+              <input type="checkbox" checked={useProxy} onChange={e => setUseProxy(e.target.checked)}
+                className="w-4 h-4 accent-[var(--accent)]" />
+              <span className="text-sm text-gray-300">使用代理拉取</span>
+            </label>
+            <span className="text-xs text-gray-500">（未配置外部代理时走容器内 sing-box 当前订阅节点）</span>
           </div>
-          <div className="flex-1">
-            <label className="text-xs text-gray-500 mb-1 block">外部代理（可选）</label>
-            <input value={fetchProxy} onChange={e => { setFetchProxy(e.target.value); setUaSaved(false) }}
-              placeholder="http://172.17.0.1:7890 或 http://<宿主机IP>:7890"
-              title="容器内 sing-box 无可用订阅/节点时（首次使用），可配置宿主机或其他机器的代理用于拉取订阅"
-              className="w-full bg-[#0f1419] border border-[var(--border)] rounded-lg px-3 py-2 text-sm font-mono" />
+          <div className="flex items-end gap-3">
+            <div className="flex-1">
+              <label className="text-xs text-gray-500 mb-1 block">本订阅外部代理（留空使用全局，none=禁用）</label>
+              <input value={subProxy} onChange={e => setSubProxy(e.target.value)}
+                placeholder="http://172.17.0.1:7890 或 none"
+                className="w-full bg-[#0f1419] border border-[var(--border)] rounded-lg px-3 py-2 text-sm font-mono" />
+            </div>
+            <div className="flex-1">
+              <label className="text-xs text-gray-500 mb-1 block">全局外部代理（作用于所有订阅，留空走内置 sing-box）</label>
+              <input value={fetchProxy} onChange={e => { setFetchProxy(e.target.value); setUaSaved('') }}
+                placeholder="http://172.17.0.1:7890 或 http://<宿主机IP>:7890"
+                title="首次使用无节点时可配宿主机/其他机器代理（docker 容器内经 NAT 可访问局域网代理）"
+                className="w-full bg-[#0f1419] border border-[var(--border)] rounded-lg px-3 py-2 text-sm font-mono" />
+            </div>
+            <button onClick={() => saveFetchSettings('proxy')}
+              className="bg-[var(--accent)] text-white px-4 py-2 rounded-lg text-sm hover:opacity-90 shrink-0">
+              {uaSaved === 'proxy' ? '✓ 已保存' : '保存代理'}
+            </button>
           </div>
-          <button onClick={saveFetchSettings}
-            className="bg-[var(--accent)] text-white px-4 py-2 rounded-lg text-sm hover:opacity-90 shrink-0">
-            {uaSaved ? '✓ 已保存' : '保存设置'}
-          </button>
         </div>
 
         <div className="flex items-center justify-end gap-2">
@@ -338,18 +410,18 @@ export default function SubscriptionsPage() {
               <span className="font-semibold">{sub.name}
                 {activeSub === sub.id && <span className="ml-2 text-xs text-green-400">● 当前</span>}
               </span>
-              {sub.use_proxy && (
+              {sub.use_proxy ? (
                 <span className="text-[10px] px-1 py-0.5 rounded bg-amber-500/20 text-amber-400 shrink-0 cursor-pointer"
-                  title="点击切换" onClick={async () => {
+                  title={`点击切换为直连。当前拉取路径：${sub.external_proxy ? (sub.external_proxy === 'none' ? '内置 sing-box（本订阅禁用外部代理）' : `外部代理 ${sub.external_proxy}（本订阅）`) : (fetchProxy.trim() ? `外部代理 ${fetchProxy.trim()}（全局）` : '内置 sing-box（全局未配置外部代理）')}`}
+                  onClick={async () => {
                     await api(`/api/subscriptions/${sub.id}/proxy`, { method: 'PUT', body: JSON.stringify({ use_proxy: !sub.use_proxy }) })
                     loadSubs()
                   }}>
-                  代理
+                  代理·{(sub.external_proxy && sub.external_proxy !== 'none') ? '外部' : (sub.external_proxy === 'none' ? '内置' : (fetchProxy.trim() ? '外部' : '内置'))}
                 </span>
-              )}
-              {!sub.use_proxy && (
+              ) : (
                 <span className="text-[10px] px-1 py-0.5 rounded bg-gray-500/20 text-gray-400 shrink-0 cursor-pointer"
-                  title="点击切换" onClick={async () => {
+                  title="点击切换为代理（走外部代理或容器内 sing-box）" onClick={async () => {
                     await api(`/api/subscriptions/${sub.id}/proxy`, { method: 'PUT', body: JSON.stringify({ use_proxy: !sub.use_proxy }) })
                     loadSubs()
                   }}>
@@ -361,15 +433,19 @@ export default function SubscriptionsPage() {
               )}
             </div>
             <div className="flex gap-2">
-              <button onClick={() => fetchSub(sub.id)}
-                className="bg-[var(--accent)] text-white px-3 py-1 rounded text-xs hover:opacity-90">更新</button>
+              <button onClick={() => openEditSub(sub)}
+                className="bg-gray-500/20 text-gray-300 px-3 py-1 rounded text-xs hover:bg-gray-500/30">编辑</button>
+              <button onClick={() => fetchSub(sub.id)} disabled={updatingId === sub.id}
+                className="bg-[var(--accent)] text-white px-3 py-1 rounded text-xs hover:opacity-90 disabled:opacity-50">
+                {updatingId === sub.id ? '更新中...' : '更新'}
+              </button>
               <button onClick={() => applySub(sub.id)} disabled={sub.node_count === 0}
                 className="bg-green-600 text-white px-3 py-1 rounded text-xs hover:opacity-90 disabled:opacity-50">应用</button>
               <button onClick={() => toggleDetail(sub.id)}
                 className="bg-gray-500/20 text-gray-300 px-3 py-1 rounded text-xs hover:bg-gray-500/30">
                 {expandedId === sub.id ? '收起' : '详情'}
               </button>
-              <button onClick={() => deleteSub(sub.id)}
+              <button onClick={() => setDeleteConfirmId(sub.id)}
                 className="bg-red-500/20 text-red-400 px-3 py-1 rounded text-xs hover:bg-red-500/30">删除</button>
             </div>
           </div>
@@ -450,6 +526,74 @@ export default function SubscriptionsPage() {
           )}
         </div>
       ))}
+
+      {/* 删除确认弹窗 */}
+      {deleteConfirmId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
+          onClick={() => setDeleteConfirmId(null)}>
+          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-4 w-full max-w-sm"
+            onClick={e => e.stopPropagation()}>
+            <h3 className="font-semibold mb-2">🗑️ 删除订阅</h3>
+            <p className="text-sm text-gray-400 mb-4">
+              确定删除「{subs.find(s => s.id === deleteConfirmId)?.name || '该订阅'}」吗？删除后不可恢复。
+              {activeSub === deleteConfirmId && <span className="block mt-1 text-amber-400">⚠ 这是当前应用的订阅，删除后应用标记将清除（节点继续运行）。</span>}
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setDeleteConfirmId(null)}
+                className="bg-gray-500/20 text-gray-300 px-4 py-2 rounded-lg text-sm hover:bg-gray-500/30">取消</button>
+              <button onClick={() => deleteSub(deleteConfirmId)}
+                className="bg-red-600 text-white px-4 py-2 rounded-lg text-sm hover:opacity-90">删除</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 编辑订阅弹窗 */}
+      {editSub && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
+          onClick={() => setEditSub(null)}>
+          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-4 w-full max-w-lg"
+            onClick={e => e.stopPropagation()}>
+            <h3 className="font-semibold mb-3">✏️ 编辑订阅</h3>
+
+            <div className="mb-3">
+              <label className="text-xs text-gray-500 mb-1 block">名称</label>
+              <input value={editName} onChange={e => setEditName(e.target.value)}
+                className="w-full bg-[#0f1419] border border-[var(--border)] rounded-lg px-3 py-2 text-sm" />
+            </div>
+
+            <label className="flex items-center gap-2 cursor-pointer mb-3 select-none">
+              <input type="checkbox" checked={editUseProxy} onChange={e => setEditUseProxy(e.target.checked)}
+                className="w-4 h-4 accent-[var(--accent)]" />
+              <span className="text-sm text-gray-300">使用代理拉取</span>
+              <span className="text-xs text-gray-500">（未配置外部代理时走容器内 sing-box 当前订阅节点）</span>
+            </label>
+
+            <div className="mb-3">
+              <label className="text-xs text-gray-500 mb-1 block">User-Agent（留空使用全局设置）</label>
+              <input value={editUA} onChange={e => setEditUA(e.target.value)}
+                placeholder="mihomo.party/v2.0.0 (clash.meta)"
+                className="w-full bg-[#0f1419] border border-[var(--border)] rounded-lg px-3 py-2 text-sm font-mono" />
+            </div>
+
+            <div className="mb-4">
+              <label className="text-xs text-gray-500 mb-1 block">外部代理（留空使用全局设置，none=禁用外部代理走内置）</label>
+              <input value={editProxy} onChange={e => setEditProxy(e.target.value)}
+                placeholder="http://172.17.0.1:7890 或 none"
+                className="w-full bg-[#0f1419] border border-[var(--border)] rounded-lg px-3 py-2 text-sm font-mono" />
+            </div>
+
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setEditSub(null)}
+                className="bg-gray-500/20 text-gray-300 px-4 py-2 rounded-lg text-sm hover:bg-gray-500/30">取消</button>
+              <button onClick={saveEditSub} disabled={loading || !editName.trim()}
+                className="bg-[var(--accent)] text-white px-4 py-2 rounded-lg text-sm hover:opacity-90 disabled:opacity-50">
+                {loading ? '保存中...' : '保存'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 内容粘贴弹窗 */}
       {showContentModal && (

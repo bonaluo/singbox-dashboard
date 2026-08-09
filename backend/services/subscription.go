@@ -15,6 +15,7 @@ import (
 	"singbox-dashboard/models"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -96,18 +97,27 @@ func SaveSubscriptions(store *models.SubscriptionStore) error {
 
 // ── 添加订阅 ──
 
-func AddSubscription(name, url string, useProxy bool, content string) (*models.Subscription, error) {
+// 订阅 ID 计数器：同一毫秒内添加多个订阅时避免 ID 碰撞
+var subIDSeq uint64
+
+func newSubID() string {
+	return fmt.Sprintf("sub_%d_%d", time.Now().UnixMilli(), atomic.AddUint64(&subIDSeq, 1))
+}
+
+func AddSubscription(name, url string, useProxy bool, content, fetchUA, externalProxy string) (*models.Subscription, error) {
 	store, err := LoadSubscriptions()
 	if err != nil {
 		return nil, err
 	}
 	sub := models.Subscription{
-		ID:       fmt.Sprintf("sub_%d", time.Now().UnixMilli()),
-		Name:     name,
-		URL:      url,
-		Kind:     models.KindURL,
-		UseProxy: useProxy,
-		Content:  content,
+		ID:            newSubID(),
+		Name:          name,
+		URL:           url,
+		Kind:          models.KindURL,
+		UseProxy:      useProxy,
+		Content:       content,
+		FetchUA:       fetchUA,
+		ExternalProxy: externalProxy,
 	}
 	store.Subscriptions = append(store.Subscriptions, sub)
 	if err := SaveSubscriptions(store); err != nil {
@@ -141,9 +151,35 @@ func DeleteSubscription(id string) error {
 	}
 	// 清理缓存数据
 	os.Remove(filepath.Join(config.DataDir, "subscription_data", id+".json"))
-	// 清理配置文件中的节点，回退到空配置或直接删除
-	os.Remove(config.SingBoxConfig)
+	// 删除的是当前已应用的订阅时，清除应用标记；保留 sing-box 配置文件，
+	// 已加载的节点继续运行（删除订阅不应导致 sing-box 停止）
+	if LoadAppliedSubscriptionID() == id {
+		os.Remove(appliedSubIDPath())
+	}
 	return nil
+}
+
+// ── 更新订阅信息 ──
+
+// UpdateSubscription 全量更新订阅的拉取配置（name/fetch_ua/external_proxy/use_proxy；
+// 空字符串表示清空该字段回退全局设置）
+func UpdateSubscription(id, name, fetchUA, externalProxy string, useProxy bool) error {
+	store, err := LoadSubscriptions()
+	if err != nil {
+		return err
+	}
+	for i := range store.Subscriptions {
+		if store.Subscriptions[i].ID == id {
+			if name != "" {
+				store.Subscriptions[i].Name = name
+			}
+			store.Subscriptions[i].FetchUA = fetchUA
+			store.Subscriptions[i].ExternalProxy = externalProxy
+			store.Subscriptions[i].UseProxy = useProxy
+			return SaveSubscriptions(store)
+		}
+	}
+	return fmt.Errorf("subscription not found: %s", id)
 }
 
 // ── 拉取订阅原始数据 ──
@@ -169,21 +205,37 @@ type FetchResult struct {
 	UpdatedAt  string            `json:"updated_at"`
 }
 
+// FetchOptions 拉取选项：订阅级配置（空 = 回退全局设置）
+type FetchOptions struct {
+	UseProxy      bool   // 是否走代理
+	FetchUA       string // 订阅级 UA；空 = 全局 LoadFetchUA
+	ExternalProxy string // 订阅级外部代理；空 = 全局 LoadFetchProxy；"none"/"direct" = 禁用外部代理
+}
+
+// FetchRawWithOptions 用指定选项拉取订阅原始数据（添加订阅验证用）
+func FetchRawWithOptions(subURL string, opts FetchOptions) (string, error) {
+	raw, err := fetchWithUA(subURL, opts)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
 // fetchTransport 构造拉取用的 http.Transport。
-// useProxy=true 时：优先走用户配置的外部代理（页面设置 > 环境变量），
-// 未配置外部代理则走容器内 sing-box 内置代理（mixed 端口 2080，即当前订阅的节点出口）。
+// useProxy=true 时：优先走 externalProxy（已按订阅级/全局解析后的最终值），
+// 空或 none/direct 则走容器内 sing-box 内置代理（mixed 端口 2080，即当前订阅的节点出口）。
 // useProxy=false（直连）时不经过任何代理。
 // 注意：Go 的 http.Transport 在 Proxy 为 nil 时会回落读取 HTTP_PROXY/HTTPS_PROXY 环境变量，
 // 因此直连时也必须显式设置返回 nil 的 Proxy 函数，确保不受容器环境变量影响。
-func fetchTransport(useProxy bool) *http.Transport {
+func fetchTransport(useProxy bool, externalProxy string) *http.Transport {
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
 	if useProxy {
-		proxy := LoadFetchProxy()
+		proxy := externalProxy
 		switch proxy {
 		case "", "none", "direct":
-			// 未配置外部代理：走容器内 sing-box 内置代理
+			// 未配置/禁用外部代理：走容器内 sing-box 内置代理
 			proxy = "http://127.0.0.1:2080"
 		}
 		proxyURL := proxy
@@ -201,15 +253,23 @@ func fetchTransport(useProxy bool) *http.Transport {
 	return tr
 }
 
-// fetchWithUA 拉取订阅原始数据：设置订阅客户端 UA 并检查 HTTP 状态码。
+// fetchWithUA 拉取订阅原始数据：解析最终 UA/外部代理（订阅级 > 全局）并检查 HTTP 状态码。
 // 部分机场在 Cloudflare 上按 UA 拦截非订阅客户端（curl/浏览器/Go 默认 UA 会 403）
-func fetchWithUA(subURL string, useProxy bool) ([]byte, error) {
-	client := &http.Client{Transport: fetchTransport(useProxy), Timeout: 30 * time.Second}
+func fetchWithUA(subURL string, opts FetchOptions) ([]byte, error) {
+	ua := opts.FetchUA
+	if ua == "" {
+		ua = LoadFetchUA()
+	}
+	proxy := opts.ExternalProxy
+	if proxy == "" {
+		proxy = LoadFetchProxy()
+	}
+	client := &http.Client{Transport: fetchTransport(opts.UseProxy, proxy), Timeout: 30 * time.Second}
 	req, err := http.NewRequest("GET", subURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("构造请求失败: %w", err)
 	}
-	req.Header.Set("User-Agent", LoadFetchUA())
+	req.Header.Set("User-Agent", ua)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("拉取失败: %w", err)
@@ -226,9 +286,9 @@ func fetchWithUA(subURL string, useProxy bool) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-// FetchRaw 拉取订阅原始数据（不依赖已有记录）
+// FetchRaw 拉取订阅原始数据（不依赖已有记录，用全局设置）
 func FetchRaw(subURL string, useProxy bool) (string, error) {
-	raw, err := fetchWithUA(subURL, useProxy)
+	raw, err := fetchWithUA(subURL, FetchOptions{UseProxy: useProxy})
 	if err != nil {
 		return "", err
 	}
@@ -273,11 +333,14 @@ func FetchAndParseSubscription(id string) (*FetchResult, error) {
 	var subURL string
 	var useProxy bool
 	var content string
+	var fetchUA, externalProxy string
 	for _, s := range store.Subscriptions {
 		if s.ID == id {
 			subURL = s.URL
 			useProxy = s.UseProxy
 			content = s.Content
+			fetchUA = s.FetchUA
+			externalProxy = s.ExternalProxy
 			break
 		}
 	}
@@ -290,8 +353,12 @@ func FetchAndParseSubscription(id string) (*FetchResult, error) {
 		// 直接粘贴的订阅内容，无需网络拉取
 		raw = content
 	} else {
-		// 拉取（跳过 SSL 验证，兼容各种订阅服务商；按订阅设置决定是否走代理）
-		rawBytes, err := fetchWithUA(subURL, useProxy)
+		// 拉取（跳过 SSL 验证，兼容各种订阅服务商；按订阅级配置决定 UA/代理，空值回退全局）
+		rawBytes, err := fetchWithUA(subURL, FetchOptions{
+			UseProxy:      useProxy,
+			FetchUA:       fetchUA,
+			ExternalProxy: externalProxy,
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -463,7 +530,7 @@ func CreateMergedSubscription(name string, sourceIDs []string, extraURLs []strin
 	}
 
 	sub := models.Subscription{
-		ID:       fmt.Sprintf("sub_%d", time.Now().UnixMilli()),
+		ID:       newSubID(),
 		Name:     name,
 		Kind:     models.KindAggregated,
 		UseProxy: useProxy,

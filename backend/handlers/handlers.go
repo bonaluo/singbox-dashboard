@@ -33,6 +33,7 @@ func Register(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/subscriptions/fetch-settings", handleSetFetchSettings)
 	mux.HandleFunc("POST /api/subscriptions", handleAddSubscription)
 	mux.HandleFunc("DELETE /api/subscriptions/{id}", handleDeleteSubscription)
+	mux.HandleFunc("PUT /api/subscriptions/{id}", handleUpdateSubscription)
 	mux.HandleFunc("POST /api/subscriptions/{id}/fetch", handleFetchSubscription)
 	mux.HandleFunc("POST /api/subscriptions/{id}/apply", handleApplySubscription)
 	mux.HandleFunc("PUT /api/subscriptions/{id}/proxy", handleToggleSubscriptionProxy)
@@ -221,17 +222,23 @@ func handleAddSubscription(w http.ResponseWriter, r *http.Request) {
 	url, _ := body["url"].(string)
 	content, _ := body["content"].(string)
 	useProxy, _ := body["use_proxy"].(bool)
+	fetchUA, _ := body["fetch_ua"].(string)
+	externalProxy, _ := body["external_proxy"].(string)
 	if name == "" || (url == "" && content == "") {
 		sendError(w, 400, "name and (url or content) required")
 		return
 	}
-	// 拉取/解析验证
+	// 拉取/解析验证（用订阅级配置；空值内部回退全局）
 	var result *services.FetchResult
 	if content != "" {
 		// 直接粘贴内容，无需网络拉取
 		result = services.ParseRaw(content)
 	} else {
-		raw, err := services.FetchRaw(url, useProxy)
+		raw, err := services.FetchRawWithOptions(url, services.FetchOptions{
+			UseProxy:      useProxy,
+			FetchUA:       fetchUA,
+			ExternalProxy: externalProxy,
+		})
 		if err != nil {
 			sendError(w, 400, "订阅地址不可达: "+err.Error())
 			return
@@ -243,7 +250,7 @@ func handleAddSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// 保存订阅
-	sub, err := services.AddSubscription(name, url, useProxy, content)
+	sub, err := services.AddSubscription(name, url, useProxy, content, fetchUA, externalProxy)
 	if err != nil {
 		sendError(w, 500, err.Error())
 		return
@@ -254,6 +261,20 @@ func handleAddSubscription(w http.ResponseWriter, r *http.Request) {
 		"subscription": sub,
 		"result":       result,
 	})
+}
+
+func handleUpdateSubscription(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	body := readBody(r)
+	name, _ := body["name"].(string)
+	fetchUA, _ := body["fetch_ua"].(string)
+	externalProxy, _ := body["external_proxy"].(string)
+	useProxy, _ := body["use_proxy"].(bool)
+	if err := services.UpdateSubscription(id, name, fetchUA, externalProxy, useProxy); err != nil {
+		sendError(w, 404, err.Error())
+		return
+	}
+	sendOK(w, map[string]string{"updated": id})
 }
 
 func handleDeleteSubscription(w http.ResponseWriter, r *http.Request) {

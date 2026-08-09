@@ -65,6 +65,9 @@ func LogPath() string           { return filepath.Join(DataDir, "sing-box.log") 
 func SubscriptionsPath() string  { return filepath.Join(DataDir, "subscriptions.json") }
 func RulesPath() string          { return filepath.Join(DataDir, "rules.json") }
 
+// SetDataDirForTest 仅供测试注入数据目录（包级变量初始化后不再读环境变量）
+func SetDataDirForTest(dir string) { DataDir = dir }
+
 // runGitCmd 执行 git 命令并返回去除空白的结果，失败返回空字符串
 func runGitCmd(args ...string) string {
 	cmd := exec.Command("git", args...)

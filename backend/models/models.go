@@ -34,6 +34,9 @@ type Subscription struct {
 	UseProxy    bool                 `json:"use_proxy,omitempty"`      // 拉取订阅时走 sing-box 代理
 	Content     string               `json:"content,omitempty"`        // 直接粘贴的订阅内容（base64 或明文节点列表），非空时优先于 URL 解析
 	Sources     []SubscriptionSource `json:"sources,omitempty"`        // kind=aggregated 时的子源列表
+	// 订阅级拉取设置（空 = 回退全局设置）
+	FetchUA      string `json:"fetch_ua,omitempty"`       // 订阅级 User-Agent
+	ExternalProxy string `json:"external_proxy,omitempty"` // 订阅级外部代理；"none"/"direct" = 禁用外部代理（走内置 sing-box）
 }
 
 type SubscriptionStore struct {
