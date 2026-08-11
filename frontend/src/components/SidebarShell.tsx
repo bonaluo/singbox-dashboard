@@ -44,7 +44,7 @@ export default function SidebarShell({ children }: { children: React.ReactNode }
         {/* 底部：状态信息 + 版本号 */}
         <div className="border-t border-[var(--border)]">
           <div id="sidebar-status-info-slot" className="px-3 pt-2 text-xs text-gray-400" />
-          <div id="sidebar-version-slot" className="px-3 pb-2 text-[10px] text-gray-600 text-center" />
+          <div id="sidebar-version-slot" className="px-3 pb-2 text-xs text-gray-400 text-center" />
         </div>
       </aside>
 

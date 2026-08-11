@@ -12,10 +12,41 @@ import (
 	"time"
 )
 
-// BackupDataVersion 备份数据格式版本号。
-// 规则：无版本号（空）= 最早期格式，导入时按 v1 兼容处理；
-// 此后每次数据格式变更（新增/改名/删除字段）必须递增版本号。
+// BackupDataVersion 数据格式版本号（与应用版本/构建号分离）。
+// 规则：
+//   - 无版本号（空）= 最早期格式（v1），导入时按 v1 兼容处理
+//   - 仅在数据结构变更（新增/改名/删除字段）时递增版本号；
+//     应用每次构建版本变化但结构不变时，升级零迁移
+//   - 跨多版本升级逐步执行迁移链（v1→v2→v3...），每步只做该版本需要的转换
 const BackupDataVersion = "2.0"
+
+// backupMigration 单步数据迁移：from 版本 → to 版本
+type backupMigration struct {
+	from string
+	to   string
+	desc string
+	fn   func(b *BackupData) error
+}
+
+// backupMigrations 迁移链（按版本顺序注册）。ImportBackup 时从备份版本
+// 逐步执行到当前版本，保证跨多个版本升级的兼容性。
+var backupMigrations = []backupMigration{
+	// v1（无版本号时代）→ v2：订阅新增流量字段（upload/download/total/expire）。
+	// 旧数据缺失这些字段时读取缺省为 0（JSON 解析自动处理），无需实际转换，
+	// 仅推进版本标记，保证后续版本有明确的迁移起点。
+	{from: "1.0", to: "2.0", desc: "订阅流量字段（旧数据缺省为 0）",
+		fn: func(b *BackupData) error { return nil }},
+}
+
+// findMigration 查找从指定版本出发的迁移步骤；无步骤返回 nil
+func findMigration(from string) *backupMigration {
+	for i := range backupMigrations {
+		if backupMigrations[i].from == from {
+			return &backupMigrations[i]
+		}
+	}
+	return nil
+}
 
 // compareVersions 比较点分版本号（如 "2.0"、"10.1"），返回 a>b:1 / a==b:0 / a<b:-1
 func compareVersions(a, b string) int {
@@ -116,16 +147,28 @@ func ImportBackup(data []byte) (string, error) {
 		return "", fmt.Errorf("备份文件格式无效: %w", err)
 	}
 
-	// 版本兼容：无版本号 = 最早期格式（v1），兼容导入；
-	// 带版本号 = 当前/后续格式，按版本处理（不支持的版本拒绝）
+	// 版本兼容：无版本号 = 最早期格式（v1）；
+	// 更高版本（未来导出）无法回滚导入，直接拒绝
 	if b.Version == "" {
-		log.Printf("⚠️ [ImportBackup] 旧版备份（无版本号），按 v1 兼容导入")
-	} else if b.Version != BackupDataVersion {
-		// 当前仅向后兼容 v1/当前版本；更高版本（未来导出）无法回滚导入
-		if compareVersions(b.Version, BackupDataVersion) > 0 {
-			return "", fmt.Errorf("备份版本 %s 高于当前支持版本 %s，请先升级程序", b.Version, BackupDataVersion)
+		log.Printf("⚠️ [ImportBackup] 旧版备份（无版本号），视为 v1 兼容导入")
+		b.Version = "1.0"
+	}
+	if compareVersions(b.Version, BackupDataVersion) > 0 {
+		return "", fmt.Errorf("备份版本 %s 高于当前支持版本 %s，请先升级程序", b.Version, BackupDataVersion)
+	}
+	// 逐步执行迁移链：v3 备份升到 v5 时，先执行 v3→v4 再 v4→v5，
+	// 每步迁移独立可测试，避免跨版本一次性转换出错
+	for compareVersions(b.Version, BackupDataVersion) < 0 {
+		step := findMigration(b.Version)
+		if step == nil {
+			return "", fmt.Errorf("备份版本 %s 缺少到 %s 的迁移路径，请先升级到中间版本后再导入",
+				b.Version, BackupDataVersion)
 		}
-		log.Printf("[ImportBackup] 备份版本 %s → 当前 %s（兼容导入）", b.Version, BackupDataVersion)
+		if err := step.fn(&b); err != nil {
+			return "", fmt.Errorf("数据迁移 %s→%s 失败: %w", step.from, step.to, err)
+		}
+		log.Printf("[ImportBackup] 数据迁移 %s → %s（%s）", step.from, step.to, step.desc)
+		b.Version = step.to
 	}
 
 	var restored []string
