@@ -843,17 +843,24 @@ func ApplySubscription(id string) error {
 		})
 	}
 
-	// 全节点 urltest 组，用于 rule_set 下载（download_detour），避免 selector 无选中节点的问题
+	// 自动选择 urltest 组：包含 🚀 节点选择（默认选中）+ 全部代理节点，
+	// 用于 rule_set 下载（download_detour）与快速自动选优
 	var autoTags []string
 	for _, t := range tags {
 		if t != "direct" {
+			if t == OutboundProxy {
+				continue // 组内引用放最前，节点不重复
+			}
 			autoTags = append(autoTags, t)
 		}
 	}
+	autoOutbounds := append([]string{OutboundProxy}, autoTags...)
+	// sing-box 1.13 urltest 不支持 default 字段（启动即自动测速选优）；
+	// 🚀 节点选择 作为成员参与测速（延迟 = 其当前选中节点的延迟）
 	newOutbounds = append(newOutbounds, map[string]interface{}{
 		"type":      "urltest",
-		"tag":       "自动选择",
-		"outbounds": autoTags,
+		"tag":       OutboundAutoSel,
+		"outbounds": autoOutbounds,
 	})
 
 	cfg["outbounds"] = buildDefaultGroupOutbounds(newOutbounds, tags, def)

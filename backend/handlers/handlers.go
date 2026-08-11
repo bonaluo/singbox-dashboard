@@ -51,6 +51,7 @@ func Register(mux *http.ServeMux) {
 
 	// ── 出站组 ──
 	mux.HandleFunc("GET /api/groups", handleListGroups)
+	mux.HandleFunc("PUT /api/groups/{name}/select", handleSelectGroup)
 	mux.HandleFunc("POST /api/groups", handleCreateGroup)
 	mux.HandleFunc("DELETE /api/groups/{name}", handleDeleteGroup)
 	mux.HandleFunc("GET /api/groups/members", handleGroupMembers)
@@ -605,6 +606,22 @@ func handleDeleteGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sendOK(w, map[string]string{"deleted": name})
+}
+
+func handleSelectGroup(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	body := readBody(r)
+	node, _ := body["node"].(string)
+	if node == "" {
+		sendError(w, 400, "node required")
+		return
+	}
+	if err := services.SwitchGroup(name, node); err != nil {
+		sendError(w, 500, "切换失败: "+err.Error())
+		return
+	}
+	services.ForceBroadcastStatus() // 立即推送新状态
+	sendOK(w, map[string]string{"group": name, "now": node})
 }
 
 func handleGroupMembers(w http.ResponseWriter, r *http.Request) {

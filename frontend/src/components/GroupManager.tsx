@@ -17,6 +17,9 @@ interface GroupInfo {
   now?: string
 }
 
+// 内置组（应用订阅自动生成，禁止删除）
+const BUILTIN_GROUPS = new Set(['🚀 节点选择', '自动选择', '🎯 全球直连', '🛑 全球拦截', '🐟 漏网之鱼', 'GLOBAL'])
+
 export default function GroupManager() {
   const [proxyMembers, setProxyMembers] = useState<GroupMember[]>([])
   const [groupMembers, setGroupMembers] = useState<GroupMember[]>([])
@@ -27,6 +30,8 @@ export default function GroupManager() {
   const [checkedNodes, setCheckedNodes] = useState<Set<string>>(new Set())
   const [checkedGroups, setCheckedGroups] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(false)
+  const [selectingGroup, setSelectingGroup] = useState<string | null>(null) // 展开切换的组
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null) // 删除确认
 
   const loadData = async () => {
     const [mRes, gRes] = await Promise.all([
@@ -93,7 +98,22 @@ export default function GroupManager() {
 
   const deleteGroup = async (name: string) => {
     await api(`/api/groups/${encodeURIComponent(name)}`, { method: 'DELETE' })
+    setDeleteConfirmId(null)
     loadData()
+  }
+
+  // 切换出站组当前选中节点（节点切换必须在出站组内进行）
+  const selectNode = async (group: string, node: string) => {
+    const r = await api(`/api/groups/${encodeURIComponent(group)}/select`, {
+      method: 'PUT',
+      body: JSON.stringify({ node }),
+    })
+    if (r.ok) {
+      setSelectingGroup(null)
+      loadData()
+    } else {
+      alert(r.error || '切换失败')
+    }
   }
 
   // 按地区分组展示节点
@@ -264,30 +284,68 @@ export default function GroupManager() {
                   {g.type === 'urltest' ? 'URL' : g.type === 'loadbalance' ? 'LB' : 'SEL'}
                 </span>
                 <span className="font-medium text-sm">{g.name}</span>
+                {BUILTIN_GROUPS.has(g.name) && (
+                  <span className="text-[10px] px-1 py-0.5 rounded bg-amber-500/20 text-amber-400 font-mono" title="内置组：由订阅应用自动生成，不可删除">
+                    🔒 内置
+                  </span>
+                )}
                 {g.now && (
                   <span className="text-xs text-gray-500">当前: {g.now}</span>
                 )}
               </div>
-              <button
-                onClick={() => deleteGroup(g.name)}
-                className="text-red-500 hover:text-red-400 text-sm transition-colors"
-                title="删除组"
-              >
-                ✕
-              </button>
+              <div className="flex items-center gap-2">
+                {g.type === 'selector' && (
+                  <button
+                    onClick={() => setSelectingGroup(selectingGroup === g.name ? null : g.name)}
+                    className="text-xs text-[var(--accent)] hover:opacity-80 transition-opacity"
+                    title="切换该组当前节点"
+                  >
+                    {selectingGroup === g.name ? '收起' : '⚡ 切换'}
+                  </button>
+                )}
+                {BUILTIN_GROUPS.has(g.name) ? (
+                  <span className="text-gray-700 text-sm cursor-not-allowed" title="内置组不可删除">✕</span>
+                ) : deleteConfirmId === g.name ? (
+                  <span className="flex items-center gap-1">
+                    <span className="text-[11px] text-red-400">确认删除?</span>
+                    <button onClick={() => deleteGroup(g.name)} className="text-red-500 hover:text-red-400 text-sm font-bold" title="确认删除">✓</button>
+                    <button onClick={() => setDeleteConfirmId(null)} className="text-gray-400 hover:text-gray-300 text-sm" title="取消">✕</button>
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => setDeleteConfirmId(g.name)}
+                    className="text-red-500 hover:text-red-400 text-sm transition-colors"
+                    title="删除组"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
             </div>
             <div className="flex flex-wrap gap-1.5">
               {g.nodes.map(n => (
                 <span
                   key={n}
-                  className={`text-[11px] px-1.5 py-0.5 rounded ${
+                  className={`text-[11px] px-1.5 py-0.5 rounded cursor-pointer transition-colors hover:opacity-80 ${
                     n === g.now ? 'bg-green-500/20 text-green-400' : 'bg-gray-500/20 text-gray-400'
                   }`}
+                  title={selectingGroup === g.name ? `点击切换为当前节点` : undefined}
+                  onClick={selectingGroup === g.name ? () => selectNode(g.name, n) : undefined}
                 >
                   {n}
                 </span>
               ))}
             </div>
+            {selectingGroup === g.name && (
+              <div className="mt-2 text-[11px] text-gray-500">
+                点击上方任一成员切换「{g.name}」的当前节点；再次点击「收起」取消
+              </div>
+            )}
+            {g.type !== 'selector' && (
+              <div className="mt-2 text-[11px] text-gray-600">
+                {g.type === 'urltest' ? '自动选择：按延迟自动选优，不可手动切换' : '负载均衡：流量按成员分发，不可手动切换'}
+              </div>
+            )}
           </div>
         ))}
       </div>

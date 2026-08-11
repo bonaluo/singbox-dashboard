@@ -5,7 +5,6 @@ import { api, notifySidebar } from '@/components/SidebarStatus'
 export default function ProxiesPage() {
   const [proxies, setProxies] = useState<any[]>([])
   const [current, setCurrent] = useState('')
-  const [switching, setSwitching] = useState(false)
 
   const load = useCallback(async () => {
     const [pr, st] = await Promise.all([api('/api/proxies'), api('/api/status')])
@@ -18,19 +17,7 @@ export default function ProxiesPage() {
 
   useEffect(() => { load() }, [load])
 
-  const switchProxy = async (tag: string) => {
-    setSwitching(true)
-    const r = await api('/api/proxies/switch', {
-      method: 'POST',
-      body: JSON.stringify({ tag }),
-    })
-    if (r.ok) {
-      setCurrent(tag)
-      notifySidebar({ current: tag })  // 零延迟
-      load()
-    }
-    setSwitching(false)
-  }
+  // 节点列表只读展示：切换节点请到「出站组管理」中选择组内成员
 
   const grouped: Record<string, any[]> = {}
   proxies.forEach(p => {
@@ -57,19 +44,22 @@ export default function ProxiesPage() {
               </div>
               <div className="space-y-1">
                 {nodes.map((p, i) => (
-                  <button
+                  <div
                     key={i}
-                    onClick={() => switchProxy(p.tag)}
-                    disabled={switching}
-                    className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${
+                    className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm ${
                       p.tag === current
                         ? 'bg-[var(--accent)]/20 border-l-2 border-[var(--accent)]'
-                        : 'bg-[var(--surface)] border-l-2 border-transparent hover:bg-[var(--surface-hover)]'
+                        : 'bg-[var(--surface)] border-l-2 border-transparent'
                     }`}
                   >
                     <span className="truncate">{p.tag}</span>
-                    <span className="text-xs text-gray-500 ml-2">{p.type}</span>
-                  </button>
+                    <span className="flex items-center gap-2 shrink-0 ml-2">
+                      {p.tag === current && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--accent)]/20 text-[var(--accent)]">当前</span>
+                      )}
+                      <span className="text-xs text-gray-500">{p.type}</span>
+                    </span>
+                  </div>
                 ))}
               </div>
             </div>

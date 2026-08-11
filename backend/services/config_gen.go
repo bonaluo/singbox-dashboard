@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"singbox-dashboard/config"
@@ -18,7 +19,7 @@ import (
 
 // 内置出站组 tag（与 Clash 系客户端习惯一致）
 const (
-	OutboundProxy      = "proxy"      // 节点选择（兼容现有前端/规则）
+	OutboundProxy      = "🚀 节点选择" // 节点选择（原 proxy，GUI.for.SingBox 同款命名）
 	OutboundDirect     = "direct"     // 直连
 	OutboundBlock      = "block"      // 拦截
 	OutboundAutoSel    = "自动选择"     // 全节点 urltest
@@ -139,10 +140,13 @@ func buildExperimentalBlock(cacheID string) map[string]interface{} {
 //   block / 🎯 全球直连 / 🛑 全球拦截 / 🐟 漏网之鱼 / GLOBAL
 //   tags 为当前所有代理节点 tag（含 direct），def 为 selector 默认选中节点。
 func buildDefaultGroupOutbounds(newOutbounds []interface{}, tags []string, def string) []interface{} {
+	// has 基于完整 outbounds 检查，避免自修复时重复添加已存在的组
 	has := func(tag string) bool {
-		for _, t := range tags {
-			if t == tag {
-				return true
+		for _, ob := range newOutbounds {
+			if m, ok := ob.(map[string]interface{}); ok {
+				if t, _ := m["tag"].(string); t == tag {
+					return true
+				}
 			}
 		}
 		return false
@@ -154,30 +158,257 @@ func buildDefaultGroupOutbounds(newOutbounds []interface{}, tags []string, def s
 		})
 	}
 	// 全球直连组（可切 block 实现全局拦截，GUI.for.SingBox 模板）
-	newOutbounds = append(newOutbounds, map[string]interface{}{
-		"type": "selector", "tag": OutboundDirectGrp,
-		"outbounds": []string{OutboundDirect, OutboundBlock},
-		"default":   OutboundDirect,
-	})
+	if !has(OutboundDirectGrp) {
+		newOutbounds = append(newOutbounds, map[string]interface{}{
+			"type": "selector", "tag": OutboundDirectGrp,
+			"outbounds": []string{OutboundDirect, OutboundBlock},
+			"default":   OutboundDirect,
+		})
+	}
 	// 全球拦截组
-	newOutbounds = append(newOutbounds, map[string]interface{}{
-		"type": "selector", "tag": OutboundBlockGrp,
-		"outbounds": []string{OutboundBlock, OutboundDirect},
-		"default":   OutboundBlock,
-	})
+	if !has(OutboundBlockGrp) {
+		newOutbounds = append(newOutbounds, map[string]interface{}{
+			"type": "selector", "tag": OutboundBlockGrp,
+			"outbounds": []string{OutboundBlock, OutboundDirect},
+			"default":   OutboundBlock,
+		})
+	}
 	// 漏网之鱼（route.final 指向，可切直连实现"白名单模式"）
-	newOutbounds = append(newOutbounds, map[string]interface{}{
-		"type": "selector", "tag": OutboundFallback,
-		"outbounds": []string{OutboundProxy, OutboundDirect},
-		"default":   OutboundProxy,
-	})
+	if !has(OutboundFallback) {
+		newOutbounds = append(newOutbounds, map[string]interface{}{
+			"type": "selector", "tag": OutboundFallback,
+			"outbounds": []string{OutboundProxy, OutboundDirect},
+			"default":   OutboundProxy,
+		})
+	}
 	// GLOBAL（clash_mode=global 时全量走此组）
-	newOutbounds = append(newOutbounds, map[string]interface{}{
-		"type": "selector", "tag": OutboundGlobal,
-		"outbounds": []string{OutboundProxy, OutboundAutoSel, OutboundDirectGrp, OutboundBlockGrp, OutboundFallback},
-		"default":   OutboundProxy,
-	})
+	if !has(OutboundGlobal) {
+		newOutbounds = append(newOutbounds, map[string]interface{}{
+			"type": "selector", "tag": OutboundGlobal,
+			"outbounds": []string{OutboundProxy, OutboundAutoSel, OutboundDirectGrp, OutboundBlockGrp, OutboundFallback},
+			"default":   OutboundProxy,
+		})
+	} else {
+		// GLOBAL 已存在：修正其引用（指向现存的组，避免引用悬挂启动失败）
+		for _, ob := range newOutbounds {
+			if m, ok := ob.(map[string]interface{}); ok {
+				if t, _ := m["tag"].(string); t == OutboundGlobal {
+					var refs []string
+					for _, r := range []string{OutboundProxy, OutboundAutoSel, OutboundDirectGrp, OutboundBlockGrp, OutboundFallback} {
+						if has(r) {
+							refs = append(refs, r)
+						}
+					}
+					m["outbounds"] = refs
+				}
+			}
+		}
+	}
 	return newOutbounds
+}
+
+// migrateLegacyProxyGroup 将旧版配置中的 proxy 出站组迁移为 🚀 节点选择，
+// 同步更新所有引用：出站组嵌套/DNS detour/路由规则/rules.json。
+func migrateLegacyProxyGroup(cfg map[string]interface{}) error {
+	changed := false
+	// 1. 出站组 tag 重命名 + 组内引用/default 替换
+	outbounds, _ := cfg["outbounds"].([]interface{})
+	for _, ob := range outbounds {
+		m, ok := ob.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if t, _ := m["tag"].(string); t == "proxy" {
+			m["tag"] = OutboundProxy
+			changed = true
+		}
+		if refs, ok := m["outbounds"].([]interface{}); ok {
+			for i, r := range refs {
+				if s, ok := r.(string); ok && s == "proxy" {
+					refs[i] = OutboundProxy
+					changed = true
+				}
+			}
+		}
+		if d, _ := m["default"].(string); d == "proxy" {
+			m["default"] = OutboundProxy
+			changed = true
+		}
+	}
+	// 1b. 自动选择组：成员头部插入 🚀 节点选择并默认选中（旧配置无此成员）
+	for _, ob := range outbounds {
+		m, ok := ob.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if t, _ := m["tag"].(string); t != OutboundAutoSel {
+			continue
+		}
+		refs, _ := m["outbounds"].([]interface{})
+		hasProxy := false
+		for _, r := range refs {
+			if s, ok := r.(string); ok && s == OutboundProxy {
+				hasProxy = true
+				break
+			}
+		}
+		if !hasProxy {
+			m["outbounds"] = append([]interface{}{OutboundProxy}, refs...)
+			changed = true
+		}
+		// 清除 urltest 的 default 残留（sing-box 1.13 urltest 不支持该字段）
+		if _, hasDef := m["default"]; hasDef {
+			delete(m, "default")
+			changed = true
+		}
+	}
+	// 2. DNS detour 引用替换
+	if dnsCfg, ok := cfg["dns"].(map[string]interface{}); ok {
+		if servers, ok := dnsCfg["servers"].([]interface{}); ok {
+			for _, s := range servers {
+				if sm, ok := s.(map[string]interface{}); ok {
+					if d, _ := sm["detour"].(string); d == "proxy" {
+						sm["detour"] = OutboundProxy
+						changed = true
+					}
+				}
+			}
+		}
+	}
+	// 3. 路由规则 outbound 引用替换
+	if route, ok := cfg["route"].(map[string]interface{}); ok {
+		if rules, ok := route["rules"].([]interface{}); ok {
+			for _, r := range rules {
+				if rm, ok := r.(map[string]interface{}); ok {
+					if ob, _ := rm["outbound"].(string); ob == "proxy" {
+						rm["outbound"] = OutboundProxy
+						changed = true
+					}
+				}
+			}
+		}
+		if final, _ := route["final"].(string); final == "proxy" {
+			route["final"] = OutboundFallback
+			changed = true
+		}
+	}
+	if changed {
+		log.Printf("🔧 迁移旧版 proxy 引用为 %s ...", OutboundProxy)
+		if err := WriteSingBoxConfig(cfg); err != nil {
+			return err
+		}
+	} else {
+		return nil // 无残留引用，无需写盘
+	}
+	// 4. 规则库（rules.json）中引用 proxy 的规则更新
+	store, err := LoadRules()
+	if err != nil {
+		return nil // 规则库不存在不阻塞
+	}
+	rulesChanged := 0
+	for i := range store.Rules {
+		if store.Rules[i].Outbound == "proxy" {
+			store.Rules[i].Outbound = OutboundProxy
+			rulesChanged++
+		}
+	}
+	if rulesChanged > 0 {
+		if err := SaveRules(store); err != nil {
+			return err
+		}
+		log.Printf("🔧 已更新 %d 条规则的 outbound 引用", rulesChanged)
+	}
+	return nil
+}
+
+// EnsureBuiltinGroups 自修复内置出站组：检查代理节点/内置组是否完整，
+// 缺失时补建并修正 GLOBAL 引用。防止用户删除内置组后 route.final 或
+// GLOBAL 引用悬挂导致 sing-box 启动失败（删除内置组后重启即自动恢复）。
+func EnsureBuiltinGroups() error {
+	cfg, err := loadSingBoxConfig()
+	if err != nil {
+		return nil // 无配置文件（未应用订阅）无需处理
+	}
+	outbounds, _ := cfg["outbounds"].([]interface{})
+	if len(outbounds) == 0 {
+		return nil
+	}
+	// 旧版本残留迁移：proxy 组/default/detour 引用 → 🚀 节点选择（幂等，
+	// 无论配置状态如何都执行，保证 default 等残留字段被清理）
+	if err := migrateLegacyProxyGroup(cfg); err != nil {
+		return err
+	}
+	cfg, err = loadSingBoxConfig()
+	if err != nil {
+		return err
+	}
+	outbounds, _ = cfg["outbounds"].([]interface{})
+	if len(outbounds) == 0 {
+		return nil
+	}
+	// 提取现有代理节点 tags 与 proxy 组默认选中
+	var tags []string
+	def := ""
+	for _, ob := range outbounds {
+		m, _ := ob.(map[string]interface{})
+		if m == nil {
+			continue
+		}
+		t, _ := m["type"].(string)
+		tag, _ := m["tag"].(string)
+		if t != "selector" && t != "direct" && t != "block" && t != "urltest" && t != "loadbalance" && tag != "" {
+			tags = append(tags, tag)
+		}
+		if t == "selector" && tag == OutboundProxy {
+			if d, ok := m["default"].(string); ok {
+				def = d
+			}
+		}
+	}
+	// 完整性检查
+	existing := make(map[string]bool)
+	for _, ob := range outbounds {
+		if m, ok := ob.(map[string]interface{}); ok {
+			if t, _ := m["tag"].(string); t != "" {
+				existing[t] = true
+			}
+		}
+	}
+	complete := existing[OutboundProxy] && existing[OutboundDirect] &&
+		existing[OutboundAutoSel] && existing[OutboundDirectGrp] &&
+		existing[OutboundBlockGrp] && existing[OutboundFallback] && existing[OutboundGlobal]
+	if complete {
+		return nil
+	}
+	if def == "" {
+		def = OutboundProxy
+	}
+	log.Printf("🔧 检测到内置出站组缺失，自动补建...")
+	cfg["outbounds"] = buildDefaultGroupOutbounds(outbounds, append(tags, OutboundDirect), def)
+	if err := WriteSingBoxConfig(cfg); err != nil {
+		return err
+	}
+	// final 重新指向漏网之鱼（组已补齐）
+	if route, ok := cfg["route"].(map[string]interface{}); ok {
+		applyFinalOutbound(route, cfg)
+	}
+	return WriteSingBoxConfig(cfg)
+}
+
+// builtinGroupTags 内置出站组（应用订阅自动生成，禁止删除，避免配置损坏后无法恢复）
+var builtinGroupTags = []string{
+	OutboundProxy, OutboundAutoSel, OutboundDirectGrp,
+	OutboundBlockGrp, OutboundFallback, OutboundGlobal,
+}
+
+// IsBuiltinGroup 判断出站组是否为内置组
+func IsBuiltinGroup(name string) bool {
+	for _, t := range builtinGroupTags {
+		if t == name {
+			return true
+		}
+	}
+	return false
 }
 
 // applyFinalOutbound 将 route.final 指向漏网之鱼组。

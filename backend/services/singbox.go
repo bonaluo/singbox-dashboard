@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"net/url"
 	"os/exec"
 	"singbox-dashboard/config"
 	"singbox-dashboard/models"
@@ -230,7 +231,8 @@ func clashCurl(args ...string) ([]byte, error) {
 
 // GetGroupNow 通过 Clash API 获取 selector/urltest 组当前选中的节点
 func GetGroupNow(tag string) string {
-	out, err := clashCurl("--max-time", "5", config.ClashAPI+"/proxies/"+tag)
+	// 组名可能含中文/emoji/空格，必须 URL 编码
+	out, err := clashCurl("--max-time", "5", config.ClashAPI+"/proxies/"+url.PathEscape(tag))
 	if err != nil {
 		return ""
 	}
@@ -243,7 +245,7 @@ func GetGroupNow(tag string) string {
 
 // GetGroupDelays 通过 Clash API 获取 urltest 组中每个节点的最新延迟
 func GetGroupDelays(tag string) map[string]int {
-	out, err := clashCurl("--max-time", "5", config.ClashAPI+"/proxies/"+tag)
+	out, err := clashCurl("--max-time", "5", config.ClashAPI+"/proxies/"+url.PathEscape(tag))
 	if err != nil {
 		return nil
 	}
@@ -276,14 +278,17 @@ func GetGroupDelays(tag string) map[string]int {
 	return delays
 }
 
-// ── 切换节点 ──
+// ── 切换出站组/节点 ──
 
-func SwitchProxy(tag string) error {
+// SwitchGroup 切换指定出站组（selector/urltest）的当前选中节点。
+// 切换节点必须通过出站组进行，节点列表本身不可切换。
+func SwitchGroup(group, tag string) error {
 	body := fmt.Sprintf(`{"name":"%s"}`, tag)
-	_, err := clashCurl("-X", "PUT", config.ClashAPI+"/proxies/proxy",
+	// 组名可能含中文/emoji/空格，必须 URL 编码（curl 对未编码的非 ASCII URL 报 malformed）
+	_, err := clashCurl("-X", "PUT", config.ClashAPI+"/proxies/"+url.PathEscape(group),
 		"-H", "Content-Type: application/json", "-d", body)
 	if err != nil {
-		return fmt.Errorf("切换节点失败: %w", err)
+		return fmt.Errorf("切换失败: %w", err)
 	}
 
 	// 持久化 selector 的默认选择，避免重启后丢失
@@ -299,12 +304,17 @@ func SwitchProxy(tag string) error {
 		}
 		t, _ := m["type"].(string)
 		name, _ := m["tag"].(string)
-		if t == "selector" && name == "proxy" {
+		if t == "selector" && name == group {
 			m["default"] = tag
 			return WriteSingBoxConfig(cfg)
 		}
 	}
 	return nil
+}
+
+// SwitchProxy 切换 proxy 组（兼容旧调用，实际走 SwitchGroup）
+func SwitchProxy(tag string) error {
+	return SwitchGroup(OutboundProxy, tag)
 }
 
 // ── 获取节点延迟 ──
@@ -360,6 +370,11 @@ func CreateGroup(name, groupType string, nodes []string) error {
 }
 
 func DeleteGroup(name string) error {
+	// 内置组（应用订阅自动生成）禁止删除：删除后无法恢复，会导致
+	// 路由规则/route.final 引用缺失使 sing-box 启动失败
+	if IsBuiltinGroup(name) {
+		return fmt.Errorf("内置组 '%s' 不可删除（由订阅应用自动生成）", name)
+	}
 	cfg, err := loadSingBoxConfig()
 	if err != nil {
 		return fmt.Errorf("加载配置失败: %w", err)
@@ -470,7 +485,11 @@ func WriteSingBoxConfig(cfg map[string]interface{}) error {
 // ── Clash API 当前节点 ──
 
 func getClashCurrent() string {
-	out, err := clashCurl(config.ClashAPI + "/proxies/proxy")
+	// 🚀 节点选择组当前选中（旧配置仍为 proxy 组时兼容回退）
+	out, err := clashCurl(config.ClashAPI + "/proxies/" + url.PathEscape(OutboundProxy))
+	if err != nil {
+		out, err = clashCurl(config.ClashAPI + "/proxies/proxy")
+	}
 	if err != nil {
 		return ""
 	}
