@@ -37,6 +37,12 @@ type Subscription struct {
 	// 订阅级拉取设置（空 = 回退全局设置）
 	FetchUA      string `json:"fetch_ua,omitempty"`       // 订阅级 User-Agent
 	ExternalProxy string `json:"external_proxy,omitempty"` // 订阅级外部代理；"none"/"direct" = 禁用外部代理（走内置 sing-box）
+
+	// 订阅流量信息（从订阅响应 subscription-userinfo header 解析，-1 表示未知）
+	Upload   int64 `json:"upload,omitempty"`   // 已用上传字节
+	Download int64 `json:"download,omitempty"` // 已用下载字节
+	Total    int64 `json:"total,omitempty"`    // 总流量字节
+	Expire   int64 `json:"expire,omitempty"`   // 到期时间戳（毫秒）
 }
 
 type SubscriptionStore struct {

@@ -2,6 +2,22 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '@/components/Sidebar'
 
+// 订阅流量格式化（来自 subscription-userinfo 头）
+function fmtBytes(b: number | undefined): string {
+  if (!b || b <= 0) return ''
+  const gb = b / (1024 * 1024 * 1024)
+  if (gb >= 1024) return (gb / 1024).toFixed(2) + ' TB'
+  return gb.toFixed(2) + ' GB'
+}
+function fmtExpire(ms: number | undefined): string {
+  if (!ms || ms <= 0) return ''
+  const d = new Date(ms)
+  const now = Date.now()
+  const days = Math.ceil((ms - now) / 86400000)
+  if (days >= 0) return d.toLocaleDateString() + ' 到期'
+  return d.toLocaleDateString() + ' 已到期'
+}
+
 export default function SubscriptionsPage() {
   const [subs, setSubs] = useState<any[]>([])
   const [name, setName] = useState('')
@@ -430,6 +446,12 @@ export default function SubscriptionsPage() {
               )}
               {sub.node_count > 0 && (
                 <span className="text-xs text-gray-400">({sub.node_count} 节点)</span>
+              )}
+              {sub.total > 0 && (
+                <span className="text-xs text-gray-400 shrink-0 ml-1">
+                  已用 {fmtBytes(sub.upload + sub.download)} / {fmtBytes(sub.total)}
+                  {sub.expire > 0 && <span className="ml-2 text-gray-500">{fmtExpire(sub.expire)}</span>}
+                </span>
               )}
             </div>
             <div className="flex gap-2">

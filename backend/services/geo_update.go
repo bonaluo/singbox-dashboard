@@ -108,8 +108,11 @@ func LoadGeoUpdateConfig() GeoUpdateConfig {
 func DownloadGeoRuleSets() error {
 	// 已知的 SagerNet 官方仓库映射（仅对 geosite-*/geoip-* 系列有效）
 	defaultRepo := map[string]string{
-		"geoip-cn":   "SagerNet/sing-geoip",
-		"geosite-cn": "SagerNet/sing-geosite",
+		"geoip-cn":                "SagerNet/sing-geoip",
+		"geosite-cn":              "SagerNet/sing-geosite",
+		"geosite-private":         "SagerNet/sing-geosite",
+		"geosite-geolocation-!cn": "SagerNet/sing-geosite",
+		"geosite-category-ads-all": "SagerNet/sing-geosite",
 	}
 
 	// 尝试通过内部代理下载（sing-box mixed-in 支持 HTTP 代理）

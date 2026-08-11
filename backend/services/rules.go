@@ -294,7 +294,8 @@ func ApplyRules() error {
 		cfg["route"] = route
 	}
 	route["rules"] = rules
-	route["final"] = "proxy"
+	// final 升级为漏网之鱼组（可切直连实现白名单模式；组不存在时保持旧值）
+	applyFinalOutbound(route, cfg)
 
 	// 自动补全 rule_set 定义：收集所有引用的 rule_set tag
 	ruleSetTags := make(map[string]bool)
@@ -311,6 +312,31 @@ func ApplyRules() error {
 				for _, t := range v {
 					if s, ok := t.(string); ok {
 						ruleSetTags[s] = true
+					}
+				}
+			}
+		}
+	}
+
+	// 收集 DNS 规则引用的 rule_set（sing-box 中 DNS 规则与路由规则共用
+	// route.rule_set 定义，缺失会导致启动 FATAL）
+	if dnsCfg, ok := cfg["dns"].(map[string]interface{}); ok {
+		if dnsRules, ok := dnsCfg["rules"].([]interface{}); ok {
+			for _, dr := range dnsRules {
+				if dm, ok := dr.(map[string]interface{}); ok {
+					if rs, ok := dm["rule_set"]; ok {
+						switch v := rs.(type) {
+						case []string:
+							for _, t := range v {
+								ruleSetTags[t] = true
+							}
+						case []interface{}:
+							for _, t := range v {
+								if s, ok := t.(string); ok {
+									ruleSetTags[s] = true
+								}
+							}
+						}
 					}
 				}
 			}

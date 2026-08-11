@@ -230,11 +230,12 @@ func handleAddSubscription(w http.ResponseWriter, r *http.Request) {
 	}
 	// 拉取/解析验证（用订阅级配置；空值内部回退全局）
 	var result *services.FetchResult
+	var traffic *services.SubscriptionUserInfo
 	if content != "" {
 		// 直接粘贴内容，无需网络拉取
 		result = services.ParseRaw(content)
 	} else {
-		raw, err := services.FetchRawWithOptions(url, services.FetchOptions{
+		raw, t, err := services.FetchRawWithOptions(url, services.FetchOptions{
 			UseProxy:      useProxy,
 			FetchUA:       fetchUA,
 			ExternalProxy: externalProxy,
@@ -243,6 +244,7 @@ func handleAddSubscription(w http.ResponseWriter, r *http.Request) {
 			sendError(w, 400, "订阅地址不可达: "+err.Error())
 			return
 		}
+		traffic = t
 		result = services.ParseRaw(raw)
 	}
 	if result.NodeCount == 0 {
@@ -250,7 +252,7 @@ func handleAddSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// 保存订阅
-	sub, err := services.AddSubscription(name, url, useProxy, content, fetchUA, externalProxy)
+	sub, err := services.AddSubscription(name, url, useProxy, content, fetchUA, externalProxy, traffic)
 	if err != nil {
 		sendError(w, 500, err.Error())
 		return

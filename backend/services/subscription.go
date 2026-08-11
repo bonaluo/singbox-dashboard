@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -104,7 +105,7 @@ func newSubID() string {
 	return fmt.Sprintf("sub_%d_%d", time.Now().UnixMilli(), atomic.AddUint64(&subIDSeq, 1))
 }
 
-func AddSubscription(name, url string, useProxy bool, content, fetchUA, externalProxy string) (*models.Subscription, error) {
+func AddSubscription(name, url string, useProxy bool, content, fetchUA, externalProxy string, traffic *SubscriptionUserInfo) (*models.Subscription, error) {
 	store, err := LoadSubscriptions()
 	if err != nil {
 		return nil, err
@@ -118,6 +119,12 @@ func AddSubscription(name, url string, useProxy bool, content, fetchUA, external
 		Content:       content,
 		FetchUA:       fetchUA,
 		ExternalProxy: externalProxy,
+	}
+	if traffic != nil {
+		sub.Upload = traffic.Upload
+		sub.Download = traffic.Download
+		sub.Total = traffic.Total
+		sub.Expire = traffic.Expire
 	}
 	store.Subscriptions = append(store.Subscriptions, sub)
 	if err := SaveSubscriptions(store); err != nil {
@@ -182,6 +189,27 @@ func UpdateSubscription(id, name, fetchUA, externalProxy string, useProxy bool) 
 	return fmt.Errorf("subscription not found: %s", id)
 }
 
+// UpdateSubscriptionTraffic 刷新订阅流量信息（拉取时从响应头更新）
+func UpdateSubscriptionTraffic(id string, traffic *SubscriptionUserInfo) {
+	if traffic == nil || id == "" {
+		return
+	}
+	store, err := LoadSubscriptions()
+	if err != nil {
+		return
+	}
+	for i := range store.Subscriptions {
+		if store.Subscriptions[i].ID == id {
+			store.Subscriptions[i].Upload = traffic.Upload
+			store.Subscriptions[i].Download = traffic.Download
+			store.Subscriptions[i].Total = traffic.Total
+			store.Subscriptions[i].Expire = traffic.Expire
+			SaveSubscriptions(store)
+			return
+		}
+	}
+}
+
 // ── 拉取订阅原始数据 ──
 
 // GetCachedSubscriptionData 读取缓存的订阅解析数据
@@ -213,12 +241,12 @@ type FetchOptions struct {
 }
 
 // FetchRawWithOptions 用指定选项拉取订阅原始数据（添加订阅验证用）
-func FetchRawWithOptions(subURL string, opts FetchOptions) (string, error) {
-	raw, err := fetchWithUA(subURL, opts)
+func FetchRawWithOptions(subURL string, opts FetchOptions) (string, *SubscriptionUserInfo, error) {
+	raw, info, err := fetchWithUA(subURL, opts)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	return string(raw), nil
+	return string(raw), info, nil
 }
 
 // fetchTransport 构造拉取用的 http.Transport。
@@ -255,7 +283,53 @@ func fetchTransport(useProxy bool, externalProxy string) *http.Transport {
 
 // fetchWithUA 拉取订阅原始数据：解析最终 UA/外部代理（订阅级 > 全局）并检查 HTTP 状态码。
 // 部分机场在 Cloudflare 上按 UA 拦截非订阅客户端（curl/浏览器/Go 默认 UA 会 403）
-func fetchWithUA(subURL string, opts FetchOptions) ([]byte, error) {
+// SubscriptionUserInfo 订阅流量信息（Clash 订阅规范 subscription-userinfo header）
+type SubscriptionUserInfo struct {
+	Upload   int64 `json:"upload"`
+	Download int64 `json:"download"`
+	Total    int64 `json:"total"`
+	Expire   int64 `json:"expire"`
+}
+
+// parseSubscriptionUserInfo 解析 subscription-userinfo 头。
+// 格式如 "upload=1024; download=2048; total=1073741824; expire=1788358377"；
+// 无 total 时视为无效信息返回 nil。
+func parseSubscriptionUserInfo(header string) *SubscriptionUserInfo {
+	if header == "" {
+		return nil
+	}
+	info := &SubscriptionUserInfo{Upload: -1, Download: -1, Total: -1, Expire: -1}
+	for _, part := range strings.Split(header, ";") {
+		kv := strings.SplitN(strings.TrimSpace(part), "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+		v, err := strconv.ParseInt(strings.TrimSpace(kv[1]), 10, 64)
+		if err != nil {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(kv[0])) {
+		case "upload":
+			info.Upload = v
+		case "download":
+			info.Download = v
+		case "total":
+			info.Total = v
+		case "expire":
+			// Clash 规范为秒级时间戳，转毫秒统一存储
+			if v > 0 && v < 100000000000 {
+				v *= 1000
+			}
+			info.Expire = v
+		}
+	}
+	if info.Total < 0 {
+		return nil // 无有效流量信息（部分机场不返回该头）
+	}
+	return info
+}
+
+func fetchWithUA(subURL string, opts FetchOptions) ([]byte, *SubscriptionUserInfo, error) {
 	ua := opts.FetchUA
 	if ua == "" {
 		ua = LoadFetchUA()
@@ -267,12 +341,12 @@ func fetchWithUA(subURL string, opts FetchOptions) ([]byte, error) {
 	client := &http.Client{Transport: fetchTransport(opts.UseProxy, proxy), Timeout: 30 * time.Second}
 	req, err := http.NewRequest("GET", subURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("构造请求失败: %w", err)
+		return nil, nil, fmt.Errorf("构造请求失败: %w", err)
 	}
 	req.Header.Set("User-Agent", ua)
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("拉取失败: %w", err)
+		return nil, nil, fmt.Errorf("拉取失败: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -281,14 +355,17 @@ func fetchWithUA(subURL string, opts FetchOptions) ([]byte, error) {
 		if strings.Contains(string(body), "cloudflare") && strings.Contains(string(body), "blocked") {
 			hint = "（被 Cloudflare 拦截，可检查订阅是否到期/机场是否封禁了出口 IP）"
 		}
-		return nil, fmt.Errorf("订阅链接返回 HTTP %d%s", resp.StatusCode, hint)
+		return nil, nil, fmt.Errorf("订阅链接返回 HTTP %d%s", resp.StatusCode, hint)
 	}
-	return io.ReadAll(resp.Body)
+	// 订阅流量信息（Clash 订阅规范：subscription-userinfo 头）
+	info := parseSubscriptionUserInfo(resp.Header.Get("subscription-userinfo"))
+	body, err := io.ReadAll(resp.Body)
+	return body, info, err
 }
 
 // FetchRaw 拉取订阅原始数据（不依赖已有记录，用全局设置）
 func FetchRaw(subURL string, useProxy bool) (string, error) {
-	raw, err := fetchWithUA(subURL, FetchOptions{UseProxy: useProxy})
+	raw, _, err := fetchWithUA(subURL, FetchOptions{UseProxy: useProxy})
 	if err != nil {
 		return "", err
 	}
@@ -352,12 +429,13 @@ func FetchAndParseSubscription(id string) (*FetchResult, error) {
 	}
 
 	var raw string
+	var trafficInfo *SubscriptionUserInfo // 本次拉取的流量信息（末尾随 store 一起保存）
 	if content != "" {
 		// 直接粘贴的订阅内容，无需网络拉取
 		raw = content
 	} else {
 		// 拉取（跳过 SSL 验证，兼容各种订阅服务商；按订阅级配置决定 UA/代理，空值回退全局）
-		rawBytes, err := fetchWithUA(subURL, FetchOptions{
+		rawBytes, info, err := fetchWithUA(subURL, FetchOptions{
 			UseProxy:      useProxy,
 			FetchUA:       fetchUA,
 			ExternalProxy: externalProxy,
@@ -366,6 +444,8 @@ func FetchAndParseSubscription(id string) (*FetchResult, error) {
 			return nil, err
 		}
 		raw = string(rawBytes)
+		// 刷新订阅流量信息（末尾统一保存，避免与 LastUpdated 更新互相覆盖）
+		trafficInfo = info
 	}
 
 	// Base64 解码
@@ -406,6 +486,13 @@ func FetchAndParseSubscription(id string) (*FetchResult, error) {
 		if store.Subscriptions[i].ID == id {
 			store.Subscriptions[i].LastUpdated = result.UpdatedAt
 			store.Subscriptions[i].NodeCount = len(nodes)
+			// 合并本次拉取的流量信息（fetched userinfo 覆盖，保持流量展示新鲜）
+			if trafficInfo != nil {
+				store.Subscriptions[i].Upload = trafficInfo.Upload
+				store.Subscriptions[i].Download = trafficInfo.Download
+				store.Subscriptions[i].Total = trafficInfo.Total
+				store.Subscriptions[i].Expire = trafficInfo.Expire
+			}
 		}
 	}
 	SaveSubscriptions(store)
@@ -769,13 +856,40 @@ func ApplySubscription(id string) error {
 		"outbounds": autoTags,
 	})
 
-	cfg["outbounds"] = newOutbounds
+	cfg["outbounds"] = buildDefaultGroupOutbounds(newOutbounds, tags, def)
 
 	// 清理可能残留的无效 default_domain_resolver
-	if route, ok := cfg["route"].(map[string]interface{}); ok {
-		if route["default_domain_resolver"] == "dns-local" {
-			delete(route, "default_domain_resolver")
+	route, _ := cfg["route"].(map[string]interface{})
+	if route == nil {
+		route = make(map[string]interface{})
+		cfg["route"] = route
+	}
+	if route["default_domain_resolver"] == "dns-local" {
+		delete(route, "default_domain_resolver")
+	}
+	// 完整 DNS 分流（移植 GUI.for.SingBox：国内直连 DNS / 国外代理 DNS）
+	if _, ok := route["default_domain_resolver"]; !ok {
+		route["default_domain_resolver"] = DNSLocal
+	}
+	cfg["dns"] = buildDNSConfig()
+
+	// experimental：Clash API secret + sing-box 原生缓存（cache.db）
+	if exp, ok := cfg["experimental"].(map[string]interface{}); ok {
+		if api, ok := exp["clash_api"].(map[string]interface{}); ok {
+			if _, ok := api["secret"]; !ok {
+				api["secret"] = EnsureClashSecret()
+			}
 		}
+		exp["cache_file"] = map[string]interface{}{
+			"enabled":      true,
+			"path":         filepath.Join(config.DataDir, "cache.db"),
+			"cache_id":     "dashboard-" + id,
+			"store_fakeip": true,
+			"store_rdrc":   true,
+			"rdrc_timeout": "7d",
+		}
+	} else {
+		cfg["experimental"] = buildExperimentalBlock("dashboard-" + id)
 	}
 
 	if err := WriteSingBoxConfig(cfg); err != nil {
@@ -787,6 +901,13 @@ func ApplySubscription(id string) error {
 	}
 	// 应用分组规则重建出站组
 	ApplyGroupRules()
+	// 首次应用时导入推荐分流规则（已有规则时不覆盖），随后应用规则到配置
+	if err := SeedRecommendedRules(); err != nil {
+		log.Printf("[subscription] 导入推荐规则失败: %v", err)
+	}
+	if err := ApplyRules(); err != nil {
+		log.Printf("[subscription] 应用规则失败: %v", err)
+	}
 	// 持久化已应用的订阅 ID（重启后前端可恢复标识）
 	return SaveAppliedSubscriptionID(id)
 }

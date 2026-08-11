@@ -219,11 +219,18 @@ func GetAllOutbounds() []models.OutboundOption {
 	return outbounds
 }
 
+// clashCurl 统一 Clash API 调用：自动附加 secret（Authorization: Bearer），
+// 保证所有 curl 请求不受 Clash API secret 限制。
+func clashCurl(args ...string) ([]byte, error) {
+	secret := EnsureClashSecret()
+	full := []string{"-s", "--noproxy", "*", "-H", "Authorization: Bearer " + secret}
+	full = append(full, args...)
+	return exec.Command("curl", full...).Output()
+}
+
 // GetGroupNow 通过 Clash API 获取 selector/urltest 组当前选中的节点
 func GetGroupNow(tag string) string {
-	cmd := exec.Command("curl", "-s", "--noproxy", "*", "--max-time", "5",
-		config.ClashAPI+"/proxies/"+tag)
-	out, err := cmd.Output()
+	out, err := clashCurl("--max-time", "5", config.ClashAPI+"/proxies/"+tag)
 	if err != nil {
 		return ""
 	}
@@ -236,9 +243,7 @@ func GetGroupNow(tag string) string {
 
 // GetGroupDelays 通过 Clash API 获取 urltest 组中每个节点的最新延迟
 func GetGroupDelays(tag string) map[string]int {
-	cmd := exec.Command("curl", "-s", "--noproxy", "*", "--max-time", "5",
-		config.ClashAPI+"/proxies/"+tag)
-	out, err := cmd.Output()
+	out, err := clashCurl("--max-time", "5", config.ClashAPI+"/proxies/"+tag)
 	if err != nil {
 		return nil
 	}
@@ -275,11 +280,9 @@ func GetGroupDelays(tag string) map[string]int {
 
 func SwitchProxy(tag string) error {
 	body := fmt.Sprintf(`{"name":"%s"}`, tag)
-	cmd := exec.Command("curl", "-s", "--noproxy", "*", "-X", "PUT",
-		config.ClashAPI+"/proxies/proxy",
-		"-H", "Content-Type: application/json",
-		"-d", body)
-	if err := cmd.Run(); err != nil {
+	_, err := clashCurl("-X", "PUT", config.ClashAPI+"/proxies/proxy",
+		"-H", "Content-Type: application/json", "-d", body)
+	if err != nil {
 		return fmt.Errorf("切换节点失败: %w", err)
 	}
 
@@ -307,10 +310,8 @@ func SwitchProxy(tag string) error {
 // ── 获取节点延迟 ──
 
 func GetProxyDelay(tag string, timeout int) int {
-	cmd := exec.Command("curl", "-s", "--noproxy", "*",
-		fmt.Sprintf("%s/proxies/%s/delay?url=https://www.google.com&timeout=%d",
-			config.ClashAPI, tag, timeout))
-	out, err := cmd.Output()
+	out, err := clashCurl(fmt.Sprintf("%s/proxies/%s/delay?url=https://www.google.com&timeout=%d",
+		config.ClashAPI, tag, timeout))
 	if err != nil {
 		return -1
 	}
@@ -426,8 +427,7 @@ func ListGroups() []models.GroupInfo {
 // ── 连接列表 ──
 
 func GetConnections() []map[string]interface{} {
-	cmd := exec.Command("curl", "-s", "--noproxy", "*", config.ClashAPI+"/connections")
-	out, err := cmd.Output()
+	out, err := clashCurl(config.ClashAPI + "/connections")
 	if err != nil {
 		return nil
 	}
@@ -470,8 +470,7 @@ func WriteSingBoxConfig(cfg map[string]interface{}) error {
 // ── Clash API 当前节点 ──
 
 func getClashCurrent() string {
-	cmd := exec.Command("curl", "-s", "--noproxy", "*", config.ClashAPI+"/proxies/proxy")
-	out, err := cmd.Output()
+	out, err := clashCurl(config.ClashAPI + "/proxies/proxy")
 	if err != nil {
 		return ""
 	}
@@ -506,8 +505,8 @@ func loadSingBoxConfig() (map[string]interface{}, error) {
 }
 
 func isRunning() bool {
-	cmd := exec.Command("curl", "-s", "--noproxy", "*", "--max-time", "2", config.ClashAPI+"/version")
-	return cmd.Run() == nil
+	_, err := clashCurl("--max-time", "2", config.ClashAPI+"/version")
+	return err == nil
 }
 
 // IsSingBoxRunning 公开的 sing-box 运行状态检查（供外部调用）
@@ -516,8 +515,7 @@ func IsSingBoxRunning() bool {
 }
 
 func getSingBoxVersion() string {
-	cmd := exec.Command("curl", "-s", "--noproxy", "*", "--max-time", "2", config.ClashAPI+"/version")
-	out, err := cmd.Output()
+	out, err := clashCurl("--max-time", "2", config.ClashAPI+"/version")
 	if err != nil {
 		return ""
 	}

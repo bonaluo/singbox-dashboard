@@ -13,7 +13,7 @@ import (
 func TestDeleteSubscription_keepsSingBoxRunning(t *testing.T) {
 	config.SetDataDirForTest(t.TempDir())
 
-	sub, err := AddSubscription("测试订阅", "https://example.com/sub", false, "", "", "")
+	sub, err := AddSubscription("测试订阅", "https://example.com/sub", false, "", "", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,8 +50,8 @@ func TestDeleteSubscription_keepsSingBoxRunning(t *testing.T) {
 func TestDeleteSubscription_keepsAppliedIDForOtherSub(t *testing.T) {
 	config.SetDataDirForTest(t.TempDir())
 
-	subA, _ := AddSubscription("A", "https://example.com/a", false, "", "", "")
-	subB, _ := AddSubscription("B", "https://example.com/b", false, "", "", "")
+	subA, _ := AddSubscription("A", "https://example.com/a", false, "", "", "", nil)
+	subB, _ := AddSubscription("B", "https://example.com/b", false, "", "", "", nil)
 	SaveAppliedSubscriptionID(subA.ID)
 
 	if err := DeleteSubscription(subB.ID); err != nil {
@@ -66,7 +66,7 @@ func TestDeleteSubscription_keepsAppliedIDForOtherSub(t *testing.T) {
 func TestDeleteSubscription_removesCache(t *testing.T) {
 	config.SetDataDirForTest(t.TempDir())
 
-	sub, _ := AddSubscription("缓存测试", "https://example.com/cache", false, "", "", "")
+	sub, _ := AddSubscription("缓存测试", "https://example.com/cache", false, "", "", "", nil)
 	// 制造缓存文件
 	cachePath := filepath.Join(config.DataDir, "subscription_data", sub.ID+".json")
 	os.MkdirAll(filepath.Dir(cachePath), 0755)

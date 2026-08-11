@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
-	"os/exec"
 	"singbox-dashboard/config"
 	"sync"
 	"time"
@@ -102,8 +101,7 @@ func ProbeNodeDownload(tag string, testURL string, fileBytes int64) float64 {
 func getProxyDelayViaAPI(tag, testURL string, timeout int) int {
 	apiURL := fmt.Sprintf("%s/proxies/%s/delay?url=%s&timeout=%d",
 		config.ClashAPI, url.PathEscape(tag), url.QueryEscape(testURL), timeout)
-	cmd := exec.Command("curl", "-s", "--noproxy", "*", "--max-time", fmt.Sprintf("%d", (timeout/1000)+2), apiURL)
-	out, err := cmd.Output()
+	out, err := clashCurl("--max-time", fmt.Sprintf("%d", (timeout/1000)+2), apiURL)
 	if err != nil {
 		return -1
 	}
