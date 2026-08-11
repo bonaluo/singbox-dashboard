@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 ARG GO_IMAGE=golang:1.25-alpine
-ARG SINGBOX_IMAGE=ghcr.io/sagernet/sing-box:v1.13.12
+ARG SINGBOX_IMAGE=ghcr.io/sagernet/sing-box:v1.13.18
 FROM ${GO_IMAGE} AS builder
 ARG GIT_COMMIT=unknown
 ARG VERSION=unknown
