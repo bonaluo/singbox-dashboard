@@ -7,9 +7,37 @@ import (
 	"os"
 	"path/filepath"
 	"singbox-dashboard/config"
+	"strconv"
 	"strings"
 	"time"
 )
+
+// BackupDataVersion 备份数据格式版本号。
+// 规则：无版本号（空）= 最早期格式，导入时按 v1 兼容处理；
+// 此后每次数据格式变更（新增/改名/删除字段）必须递增版本号。
+const BackupDataVersion = "2.0"
+
+// compareVersions 比较点分版本号（如 "2.0"、"10.1"），返回 a>b:1 / a==b:0 / a<b:-1
+func compareVersions(a, b string) int {
+	as := strings.Split(a, ".")
+	bs := strings.Split(b, ".")
+	for i := 0; i < len(as) || i < len(bs); i++ {
+		var ai, bi int
+		if i < len(as) {
+			ai, _ = strconv.Atoi(as[i])
+		}
+		if i < len(bs) {
+			bi, _ = strconv.Atoi(bs[i])
+		}
+		if ai != bi {
+			if ai > bi {
+				return 1
+			}
+			return -1
+		}
+	}
+	return 0
+}
 
 // BackupData 备份数据结构，包含所有 dashboard 管理的配置
 type BackupData struct {
@@ -27,7 +55,7 @@ type BackupData struct {
 // ExportBackup 收集所有配置数据，打包为 JSON 备份
 func ExportBackup() (*BackupData, error) {
 	b := &BackupData{
-		Version:       "1.0",
+		Version:       BackupDataVersion, // 导出必须携带当前数据格式版本号
 		ExportedAt:    time.Now().Format(time.RFC3339),
 		SubDataFiles:  make(map[string]json.RawMessage),
 	}
@@ -88,8 +116,16 @@ func ImportBackup(data []byte) (string, error) {
 		return "", fmt.Errorf("备份文件格式无效: %w", err)
 	}
 
+	// 版本兼容：无版本号 = 最早期格式（v1），兼容导入；
+	// 带版本号 = 当前/后续格式，按版本处理（不支持的版本拒绝）
 	if b.Version == "" {
-		return "", fmt.Errorf("无效的备份文件：缺少 version 字段")
+		log.Printf("⚠️ [ImportBackup] 旧版备份（无版本号），按 v1 兼容导入")
+	} else if b.Version != BackupDataVersion {
+		// 当前仅向后兼容 v1/当前版本；更高版本（未来导出）无法回滚导入
+		if compareVersions(b.Version, BackupDataVersion) > 0 {
+			return "", fmt.Errorf("备份版本 %s 高于当前支持版本 %s，请先升级程序", b.Version, BackupDataVersion)
+		}
+		log.Printf("[ImportBackup] 备份版本 %s → 当前 %s（兼容导入）", b.Version, BackupDataVersion)
 	}
 
 	var restored []string

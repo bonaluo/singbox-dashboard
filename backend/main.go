@@ -30,6 +30,10 @@ func main() {
 		if err := services.EnsureBuiltinGroups(); err != nil {
 			log.Printf("[main] EnsureBuiltinGroups 警告: %v", err)
 		}
+		// 补建 DNS 分流 / Clash API secret / cache.db（旧数据升级场景）
+		if err := services.EnsureDNSAndCache(); err != nil {
+			log.Printf("[main] EnsureDNSAndCache 警告: %v", err)
+		}
 		// 启动前先重建规则，自动生成缺失的 .srs 占位文件并清理无效 rule_set 引用
 		// 避免新环境缺少 .srs 文件导致 sing-box 启动失败（死循环）
 		if _, err := os.Stat(config.RulesPath()); err == nil {

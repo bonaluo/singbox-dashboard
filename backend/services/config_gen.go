@@ -395,6 +395,66 @@ func EnsureBuiltinGroups() error {
 	return WriteSingBoxConfig(cfg)
 }
 
+// EnsureDNSAndCache 补建 DNS 分流 / Clash API secret / cache.db（旧数据升级场景：
+// 这些只在 ApplySubscription 时生成，旧配置直接升级镜像不会触发，此处幂等补建）。
+func EnsureDNSAndCache() error {
+	cfg, err := loadSingBoxConfig()
+	if err != nil {
+		return nil // 无配置不处理
+	}
+	changed := false
+
+	// DNS 分流缺失时补建
+	if _, ok := cfg["dns"]; !ok {
+		cfg["dns"] = buildDNSConfig()
+		log.Printf("🔧 补建 DNS 分流配置...")
+		changed = true
+	}
+	// route.default_domain_resolver
+	if route, ok := cfg["route"].(map[string]interface{}); ok {
+		if _, ok := route["default_domain_resolver"]; !ok {
+			route["default_domain_resolver"] = DNSLocal
+			changed = true
+		}
+	}
+
+	// experimental：cache_file + secret
+	if exp, ok := cfg["experimental"].(map[string]interface{}); ok {
+		if _, ok := exp["cache_file"]; !ok {
+			cacheID := "dashboard"
+			if id := LoadAppliedSubscriptionID(); id != "" {
+				cacheID = "dashboard-" + id
+			}
+			exp["cache_file"] = map[string]interface{}{
+				"enabled":      true,
+				"path":         filepath.Join(config.DataDir, "cache.db"),
+				"cache_id":     cacheID,
+				"store_fakeip": true,
+				"store_rdrc":   true,
+				"rdrc_timeout": "7d",
+			}
+			log.Printf("🔧 补建 sing-box 原生缓存（cache.db）...")
+			changed = true
+		}
+		if api, ok := exp["clash_api"].(map[string]interface{}); ok {
+			if _, ok := api["secret"]; !ok {
+				api["secret"] = EnsureClashSecret()
+				log.Printf("🔧 补建 Clash API secret...")
+				changed = true
+			}
+		}
+	} else {
+		cfg["experimental"] = buildExperimentalBlock("dashboard")
+		log.Printf("🔧 补建 experimental（secret + cache.db）...")
+		changed = true
+	}
+
+	if !changed {
+		return nil
+	}
+	return WriteSingBoxConfig(cfg)
+}
+
 // builtinGroupTags 内置出站组（应用订阅自动生成，禁止删除，避免配置损坏后无法恢复）
 var builtinGroupTags = []string{
 	OutboundProxy, OutboundAutoSel, OutboundDirectGrp,
