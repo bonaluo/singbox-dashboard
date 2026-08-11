@@ -794,7 +794,9 @@ func ApplySubscription(id string) error {
 		newOutbounds = append(newOutbounds, nodeOutbound(n))
 	}
 
-	// 构建 selector（全部代理节点 + direct），同时按地区分组生成地区 urltest 出站
+	// 构建 🚀 节点选择（全部代理节点 + 自动选择 + direct），
+	// 用户可在组内手动切换任意节点或切到"自动选择"自动选优；
+	// 同时按地区分组生成地区 urltest 出站
 	var tags []string
 	regionGroups := make(map[string][]string)
 	for _, n := range cachedNodes {
@@ -822,9 +824,11 @@ func ApplySubscription(id string) error {
 			break
 		}
 	}
+	// 🚀 节点选择包含"自动选择"组（自动选优入口，GUI.for.SingBox 同款结构）
+	selOutbounds := append([]string{OutboundAutoSel}, tags...)
 	newOutbounds = append(newOutbounds, map[string]interface{}{
-		"type": "selector", "tag": "proxy",
-		"outbounds": tags,
+		"type": "selector", "tag": OutboundProxy,
+		"outbounds": selOutbounds,
 		"default":   def,
 	})
 	newOutbounds = append(newOutbounds, map[string]interface{}{
@@ -843,24 +847,18 @@ func ApplySubscription(id string) error {
 		})
 	}
 
-	// 自动选择 urltest 组：包含 🚀 节点选择（默认选中）+ 全部代理节点，
-	// 用于 rule_set 下载（download_detour）与快速自动选优
+	// 自动选择 urltest 组：全部代理节点，自动测速选优
+	// （被 🚀 节点选择 组引用；urltest 不支持 default，启动即自动选优）
 	var autoTags []string
 	for _, t := range tags {
-		if t != "direct" {
-			if t == OutboundProxy {
-				continue // 组内引用放最前，节点不重复
-			}
+		if t != "direct" && t != OutboundAutoSel {
 			autoTags = append(autoTags, t)
 		}
 	}
-	autoOutbounds := append([]string{OutboundProxy}, autoTags...)
-	// sing-box 1.13 urltest 不支持 default 字段（启动即自动测速选优）；
-	// 🚀 节点选择 作为成员参与测速（延迟 = 其当前选中节点的延迟）
 	newOutbounds = append(newOutbounds, map[string]interface{}{
 		"type":      "urltest",
 		"tag":       OutboundAutoSel,
-		"outbounds": autoOutbounds,
+		"outbounds": autoTags,
 	})
 
 	cfg["outbounds"] = buildDefaultGroupOutbounds(newOutbounds, tags, def)

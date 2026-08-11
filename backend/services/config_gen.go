@@ -173,13 +173,37 @@ func buildDefaultGroupOutbounds(newOutbounds []interface{}, tags []string, def s
 			"default":   OutboundBlock,
 		})
 	}
-	// 漏网之鱼（route.final 指向，可切直连实现"白名单模式"）
+	// 漏网之鱼（route.final 指向；可选 🚀 节点选择 或 🎯 全球直连，
+	// 切到直连组即实现"白名单模式"）
 	if !has(OutboundFallback) {
 		newOutbounds = append(newOutbounds, map[string]interface{}{
 			"type": "selector", "tag": OutboundFallback,
-			"outbounds": []string{OutboundProxy, OutboundDirect},
+			"outbounds": []string{OutboundProxy, OutboundDirectGrp},
 			"default":   OutboundProxy,
 		})
+	} else {
+		// 已存在：修正成员为 [🚀 节点选择, 🎯 全球直连]
+		for _, ob := range newOutbounds {
+			if m, ok := ob.(map[string]interface{}); ok {
+				if t, _ := m["tag"].(string); t == OutboundFallback {
+					refs, _ := m["outbounds"].([]interface{})
+					hasP, hasD := false, false
+					for _, r := range refs {
+						if s, ok := r.(string); ok {
+							if s == OutboundProxy { hasP = true }
+							if s == OutboundDirectGrp { hasD = true }
+						}
+					}
+					var fixed []interface{}
+					if hasP { fixed = append(fixed, OutboundProxy) }
+					if hasD { fixed = append(fixed, OutboundDirectGrp) }
+					if !hasP || !hasD {
+						if !hasP { fixed = append([]interface{}{OutboundProxy}, fixed...) }
+						m["outbounds"] = fixed
+					}
+				}
+			}
+		}
 	}
 	// GLOBAL（clash_mode=global 时全量走此组）
 	if !has(OutboundGlobal) {
@@ -235,7 +259,8 @@ func migrateLegacyProxyGroup(cfg map[string]interface{}) error {
 			changed = true
 		}
 	}
-	// 1b. 自动选择组：成员头部插入 🚀 节点选择并默认选中（旧配置无此成员）
+	// 1b. 自动选择组：成员移除 🚀 节点选择（urltest 应为纯节点），
+	// 并清除 urltest 的 default 残留（sing-box 1.13 urltest 不支持该字段）
 	for _, ob := range outbounds {
 		m, ok := ob.(map[string]interface{})
 		if !ok {
@@ -245,20 +270,41 @@ func migrateLegacyProxyGroup(cfg map[string]interface{}) error {
 			continue
 		}
 		refs, _ := m["outbounds"].([]interface{})
-		hasProxy := false
+		var filtered []interface{}
 		for _, r := range refs {
 			if s, ok := r.(string); ok && s == OutboundProxy {
-				hasProxy = true
+				changed = true
+				continue // 移除节点选择成员
+			}
+			filtered = append(filtered, r)
+		}
+		if len(filtered) != len(refs) {
+			m["outbounds"] = filtered
+		}
+		if _, hasDef := m["default"]; hasDef {
+			delete(m, "default")
+			changed = true
+		}
+	}
+	// 1c. 🚀 节点选择 组：成员补入"自动选择"（旧配置无此成员）
+	for _, ob := range outbounds {
+		m, ok := ob.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if t, _ := m["tag"].(string); t != OutboundProxy {
+			continue
+		}
+		refs, _ := m["outbounds"].([]interface{})
+		hasAuto := false
+		for _, r := range refs {
+			if s, ok := r.(string); ok && s == OutboundAutoSel {
+				hasAuto = true
 				break
 			}
 		}
-		if !hasProxy {
-			m["outbounds"] = append([]interface{}{OutboundProxy}, refs...)
-			changed = true
-		}
-		// 清除 urltest 的 default 残留（sing-box 1.13 urltest 不支持该字段）
-		if _, hasDef := m["default"]; hasDef {
-			delete(m, "default")
+		if !hasAuto {
+			m["outbounds"] = append([]interface{}{OutboundAutoSel}, refs...)
 			changed = true
 		}
 	}
